@@ -283,7 +283,7 @@ const Neo4jDB = {
 
       return {
         contextTexts,
-        sourceDocuments,
+        sources: sourceDocuments,
         scores,
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace}` : null,
       };
