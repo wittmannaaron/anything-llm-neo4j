@@ -260,7 +260,7 @@ const Neo4jDB = {
       );                                                                                                                    
                                                                                                                             
       result.records.forEach(record => {                                                                                    
-        console.log(`Debug: Document ${record.get("sourceDocument")} has similarity ${record.get("similarity")}`); 
+        // console.log(`Debug: Document ${record.get("sourceDocument")} has similarity ${record.get("similarity")}`); 
       });
 
       // Verarbeitet die Ergebnisse
