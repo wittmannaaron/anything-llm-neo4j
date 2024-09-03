@@ -208,7 +208,7 @@ const Neo4jDB = {
     try {
       // Überprüft, ob der Namespace existiert und Dokumente enthält
       const namespaceCount = await this.namespaceCount(namespace);
-      console.log(`Debug: Namespace ${namespace} contains ${namespaceCount} documents`);
+      // console.log(`Debug: Namespace ${namespace} contains ${namespaceCount} documents`);
 
       if (namespaceCount === 0) {
         return {
@@ -225,8 +225,8 @@ const Neo4jDB = {
       // Stellt sicher, dass topN eine ganze Zahl ist
       const limitValue = neo4j.int(Math.floor(topN));
 
-      console.log("Debug: limitValue =", limitValue);
-      console.log("Debug: similarityThreshold =", similarityThreshold);
+      // console.log("Debug: limitValue =", limitValue);
+      // console.log("Debug: similarityThreshold =", similarityThreshold);
 
       // Add a function to fetch and log embeddings from the database
       async function logStoredEmbeddings(session, namespace) {
@@ -235,10 +235,10 @@ const Neo4jDB = {
             `MATCH (d:Document:${namespace}) RETURN d.doc_id AS docId, d.embedding AS embedding`
           );
           result.records.forEach((record) => {
-            console.log(
-              `Debug: Stored Embedding for docId ${record.get("docId")}:`,
-              record.get("embedding")
-            );
+            // console.log(
+            //   `Debug: Stored Embedding for docId ${record.get("docId")}:`,
+            //   record.get("embedding")
+            // );
           });
         } catch (error) {
           console.error(`Neo4j::Failed to fetch embeddings - ${error.message}`);
@@ -246,7 +246,7 @@ const Neo4jDB = {
       }
 
       // Führt die Ähnlichkeitssuche in der Datenbank durch
-      console.log("Debug: Query Vector", queryVector);
+      // console.log("Debug: Query Vector", queryVector);
       // Call this function before running the similarity search
       await logStoredEmbeddings(session, namespace);
       const result = await session.run(                                                                                     
@@ -275,11 +275,11 @@ const Neo4jDB = {
         scores.push(record.get("similarity"));
       });
 
-      console.log("Debug: Search results", {
-        contextTextsLength: contextTexts.length,
-        sourceDocumentsLength: sourceDocuments.length,
-        scoresLength: scores.length
-      });
+      // console.log("Debug: Search results", {
+      //   contextTextsLength: contextTexts.length,
+      //   sourceDocumentsLength: sourceDocuments.length,
+      //   scoresLength: scores.length
+      // });
 
       return {
         contextTexts,
