@@ -229,6 +229,7 @@ const Neo4jDB = {
       console.log("Debug: similarityThreshold =", similarityThreshold);
 
       // Führt die Ähnlichkeitssuche in der Datenbank durch
+      console.log("Debug: Query Vector", queryVector);
       const result = await session.run(
         `MATCH (d:Document:${namespace})
          WHERE ALL(filter IN $filterFilters WHERE NOT d.doc_id IN filter)
@@ -240,6 +241,7 @@ const Neo4jDB = {
          LIMIT $limitValue`,
         { namespace, queryVector, similarityThreshold, limitValue, filterFilters }
       );
+      console.log("Debug: Query Result", result);
 
       // Verarbeitet die Ergebnisse
       const contextTexts = [];
