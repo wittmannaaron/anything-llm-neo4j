@@ -228,20 +228,40 @@ const Neo4jDB = {
       console.log("Debug: limitValue =", limitValue);
       console.log("Debug: similarityThreshold =", similarityThreshold);
 
+      // Add a function to fetch and log embeddings from the database
+      async function logStoredEmbeddings(session, namespace) {
+        try {
+          const result = await session.run(
+            `MATCH (d:Document:${namespace}) RETURN d.doc_id AS docId, d.embedding AS embedding`
+          );
+          result.records.forEach((record) => {
+            console.log(
+              `Debug: Stored Embedding for docId ${record.get("docId")}:`,
+              record.get("embedding")
+            );
+          });
+        } catch (error) {
+          console.error(`Neo4j::Failed to fetch embeddings - ${error.message}`);
+        }
+      }
+
       // Führt die Ähnlichkeitssuche in der Datenbank durch
       console.log("Debug: Query Vector", queryVector);
-      const result = await session.run(
-        `MATCH (d:Document:${namespace})
-         WHERE ALL(filter IN $filterFilters WHERE NOT d.doc_id IN filter)
-         WITH d, 
-         gds.similarity.cosine(d.embedding, $queryVector) AS similarity
-         WHERE similarity >= $similarityThreshold
-         RETURN d.pageContent AS contextText, d.metadata AS sourceDocument, similarity
-         ORDER BY similarity DESC
-         LIMIT $limitValue`,
-        { namespace, queryVector, similarityThreshold, limitValue, filterFilters }
-      );
-      console.log("Debug: Query Result", result);
+      // Call this function before running the similarity search
+      await logStoredEmbeddings(session, namespace);
+      const result = await session.run(                                                                                     
+        `MATCH (d:Document:${namespace})                                                                                    
+         WHERE ALL(filter IN $filterFilters WHERE NOT d.doc_id IN filter)                                                   
+         WITH d,                                                                                                            
+         gds.similarity.cosine(d.embedding, $queryVector) AS similarity                                                     
+         RETURN d.pageContent AS contextText, d.metadata AS sourceDocument, similarity                                      
+         ORDER BY similarity DESC`,                                                                                         
+        { namespace, queryVector, filterFilters }                                                                           
+      );                                                                                                                    
+                                                                                                                            
+      result.records.forEach(record => {                                                                                    
+        console.log(`Debug: Document ${record.get("sourceDocument")} has similarity ${record.get("similarity").toNumber()}` 
+      }); 
 
       // Verarbeitet die Ergebnisse
       const contextTexts = [];
