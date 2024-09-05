@@ -137,6 +137,11 @@ const Neo4jDB = {
       // Extrahiert die benötigten Daten aus documentData
       const { id, pageContent, ...metadata } = documentData;
 
+      // Ensure that id is present and valid
+      if (!id || typeof id !== 'string') {
+        throw new Error("Invalid or missing id in document data");
+      }
+
       // Holt den konfigurierten Embedder
       const embedder = getEmbeddingEngineSelection();
 
@@ -157,14 +162,14 @@ const Neo4jDB = {
           embedding: $embedding
         })`,
         {
-          docId: id,
+          docId: id, // Use the original id from the document
           pageContent: pageContent,
           metadata: JSON.stringify(metadata), // Metadaten als JSON-String
           embedding: embedding // Speichert den tatsächlichen Embedding-Vektor
         }
       );
 
-      console.log(`Neo4j::Document added to ${namespace}`);
+      console.log(`Neo4j::Document added to ${namespace} with id ${id}`);
       return { vectorized: true, error: null };
     } catch (error) {
       console.error(`Neo4j::Failed to add document - ${error.message}`);
@@ -178,6 +183,12 @@ const Neo4jDB = {
   deleteDocumentFromNamespace: async function (namespace, docId) {
     const session = await this.getSession();
     try {
+      console.log(`Neo4j::Attempting to delete document with id ${docId} from ${namespace}`);
+      
+      // Log all documents in the namespace before deletion
+      console.log("Documents in namespace before deletion:");
+      await this.listDocumentsInNamespace(namespace);
+      
       const result = await session.run(
         `MATCH (d:Document:${namespace} {doc_id: $docId})
          DETACH DELETE d
@@ -186,10 +197,32 @@ const Neo4jDB = {
       );
       const deletedCount = result.records[0].get('deletedCount').toNumber();
       console.log(`Neo4j::Deleted ${deletedCount} nodes with docId ${docId} from ${namespace}`);
-      return true;
+      
+      // Log all documents in the namespace after deletion
+      console.log("Documents in namespace after deletion:");
+      await this.listDocumentsInNamespace(namespace);
+      
+      return deletedCount > 0;
     } catch (error) {
       console.error(`Neo4j::Failed to delete document - ${error.message}`);
       return false;
+    } finally {
+      await session.close();
+    }
+  },
+
+  listDocumentsInNamespace: async function(namespace) {
+    const session = await this.getSession();
+    try {
+      const result = await session.run(
+        `MATCH (d:Document:${namespace})
+         RETURN d.doc_id AS docId, d.pageContent AS pageContent, d.metadata AS metadata`
+      );
+      result.records.forEach((record) => {
+        console.log(`Doc ID: ${record.get("docId")}, Content: ${record.get("pageContent").substring(0, 50)}..., Metadata: ${record.get("metadata")}`);
+      });
+    } catch (error) {
+      console.error(`Neo4j::Failed to list documents in namespace - ${error.message}`);
     } finally {
       await session.close();
     }
@@ -249,17 +282,17 @@ const Neo4jDB = {
       // console.log("Debug: Query Vector", queryVector);
       // Call this function before running the similarity search
       await logStoredEmbeddings(session, namespace);
-      const result = await session.run(                                                                                     
+      const result = await session.run(
         `MATCH (d:Document:${namespace})                                                                                    
          WHERE ALL(filter IN $filterFilters WHERE NOT d.doc_id IN filter)                                                   
          WITH d,                                                                                                            
          gds.similarity.cosine(d.embedding, $queryVector) AS similarity                                                     
          RETURN d.pageContent AS contextText, d.metadata AS sourceDocument, similarity                                      
-         ORDER BY similarity DESC`,                                                                                         
-        { namespace, queryVector, filterFilters }                                                                           
-      );                                                                                                                    
-                                                                                                                            
-      result.records.forEach(record => {                                                                                    
+         ORDER BY similarity DESC`,
+        { namespace, queryVector, filterFilters }
+      );
+
+      result.records.forEach((record) => {
         // console.log(`Debug: Document ${record.get("sourceDocument")} has similarity ${record.get("similarity")}`); 
       });
 
