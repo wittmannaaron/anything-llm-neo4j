@@ -134,26 +134,26 @@ const Neo4jDB = {
   ) {
     const session = await this.getSession();
     try {
-      // Extrahiert die benötigten Daten aus documentData
-      const { id, pageContent, ...metadata } = documentData;
+      // Extract the required data from documentData
+      const { docId, pageContent, ...metadata } = documentData;
 
-      // Ensure that id is present and valid
-      if (!id || typeof id !== 'string') {
-        throw new Error("Invalid or missing id in document data");
+      // Ensure that docId is present and valid
+      if (!docId || typeof docId !== 'string') {
+        throw new Error("Invalid or missing docId in document data");
       }
 
-      // Holt den konfigurierten Embedder
+      // Get the configured embedder
       const embedder = getEmbeddingEngineSelection();
 
-      // Erstellt das Embedding
+      // Create the embedding
       const embedding = await embedder.embedTextInput(pageContent);
 
-      // Überprüft, ob das Embedding vorhanden ist
+      // Check if the embedding is present
       if (!embedding || !Array.isArray(embedding)) {
         throw new Error("Embedding vector is missing or not an array");
       }
 
-      // Erstellt einen neuen Knoten in der Datenbank
+      // Create a new node in the database
       await session.run(
         `CREATE (d:Document:${namespace} {
           docId: $docId,
@@ -162,14 +162,14 @@ const Neo4jDB = {
           embedding: $embedding
         })`,
         {
-          docId: id, // Use the original id from the document
+          docId: docId, // Use docId consistently
           pageContent: pageContent,
-          metadata: JSON.stringify(metadata), // Metadaten als JSON-String
-          embedding: embedding // Speichert den tatsächlichen Embedding-Vektor
+          metadata: JSON.stringify(metadata),
+          embedding: embedding
         }
       );
 
-      console.log(`Neo4j::Document added to ${namespace} with id ${id}`);
+      console.log(`Neo4j::Document added to ${namespace} with docId ${docId}`);
       return { vectorized: true, error: null };
     } catch (error) {
       console.error(`Neo4j::Failed to add document - ${error.message}`);
