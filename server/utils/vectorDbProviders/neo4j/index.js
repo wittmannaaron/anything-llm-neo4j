@@ -183,14 +183,14 @@ const Neo4jDB = {
   deleteDocumentFromNamespace: async function (namespace, docId) {
     const session = await this.getSession();
     try {
-      console.log(`Neo4j::Attempting to delete document with id ${docId} from ${namespace}`);
+      console.log(`Neo4j::Attempting to delete document with docId ${docId} from ${namespace}`);
       
       // Log all documents in the namespace before deletion
       console.log("Documents in namespace before deletion:");
       await this.listDocumentsInNamespace(namespace);
       
       const result = await session.run(
-        `MATCH (d:Document:${namespace} {doc_id: $docId})
+        `MATCH (d:Document:${namespace} {docId: $docId})
          DETACH DELETE d
          RETURN count(d) as deletedCount`,
         { docId }
