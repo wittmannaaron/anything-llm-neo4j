@@ -1,7 +1,7 @@
-require("dotenv").config();
+require('dotenv').config();
 
 const neo4j = require('neo4j-driver');
-const { getEmbeddingEngineSelection } = require("../../helpers");
+const { getEmbeddingEngineSelection } = require('../../helpers');
 
 const log = (level, message, ...args) => {
   console[level](`Neo4j::${message}`, ...args);
@@ -13,19 +13,19 @@ const handleError = (error, customMessage) => {
 };
 
 const Neo4jDB = {
-  name: "Neo4j",
+  name: 'Neo4j',
   driver: null,
 
   initialize: async function() {
-    if (process.env.VECTOR_DB !== "neo4j") {
-      throw new Error("Invalid ENV settings");
+    if (process.env.VECTOR_DB !== 'neo4j') {
+      throw new Error('Invalid ENV settings');
     }
 
     if (!process.env.NEO4J_URI || !process.env.NEO4J_USER || !process.env.NEO4J_PASSWORD) {
-      throw new Error("Missing required environment variables");
+      throw new Error('Missing required environment variables');
     }
 
-    log('log', "Attempting connection with:", {
+    log('log', 'Attempting connection with:', {
       uri: process.env.NEO4J_URI,
       user: process.env.NEO4J_USER,
     });
@@ -37,10 +37,10 @@ const Neo4jDB = {
 
     try {
       await this.driver.verifyConnectivity();
-      log('log', "Connection established");
+      log('log', 'Connection established');
       await this.createEmbeddingIndex();
     } catch (error) {
-      throw handleError(error, "Connection failed");
+      throw handleError(error, 'Connection failed');
     }
   },
 
@@ -52,9 +52,9 @@ const Neo4jDB = {
         FOR (d:Document)
         ON (d.embedding)
       `);
-      log('log', "Embedding index created or already exists");
+      log('log', 'Embedding index created or already exists');
     } catch (error) {
-      handleError(error, "Failed to create embedding index");
+      handleError(error, 'Failed to create embedding index');
     } finally {
       await session.close();
     }
@@ -77,10 +77,10 @@ const Neo4jDB = {
   heartbeat: async function() {
     const session = await this.getSession();
     try {
-      await session.run("RETURN 1");
+      await session.run('RETURN 1');
       return { heartbeat: true };
     } catch (error) {
-      return handleError(error, "Heartbeat failed");
+      return handleError(error, 'Heartbeat failed');
     } finally {
       await session.close();
     }
@@ -92,9 +92,9 @@ const Neo4jDB = {
       const result = await session.run(
         `MATCH (d:Document:${namespace}) RETURN count(d) as count LIMIT 1`
       );
-      return result.records[0].get("count").toNumber() > 0;
+      return result.records[0].get('count').toNumber() > 0;
     } catch (error) {
-      return handleError(error, "Failed to check namespace");
+      return handleError(error, 'Failed to check namespace');
     } finally {
       await session.close();
     }
@@ -106,26 +106,26 @@ const Neo4jDB = {
       const result = await session.run(
         `MATCH (d:Document:${namespace}) RETURN count(d) as count`
       );
-      return result.records[0].get("count").toNumber();
+      return result.records[0].get('count').toNumber();
     } catch (error) {
-      return handleError(error, "Failed to count namespace");
+      return handleError(error, 'Failed to count namespace');
     } finally {
       await session.close();
     }
   },
 
-  addDocumentToNamespace: async function (namespace, documentData) {
+  addDocumentToNamespace: async function(namespace, documentData) {
     const session = await this.getSession();
     try {
       const { docId, pageContent, ...metadata } = documentData;
       if (!docId || typeof docId !== 'string') {
-        throw new Error("Invalid or missing docId in document data");
+        throw new Error('Invalid or missing docId in document data');
       }
 
       const embedder = getEmbeddingEngineSelection();
       const embedding = await embedder.embedTextInput(pageContent);
       if (!embedding) {
-        throw new Error("Failed to generate embedding");
+        throw new Error('Failed to generate embedding');
       }
 
       await session.run(
@@ -138,13 +138,13 @@ const Neo4jDB = {
       log('log', `Document added to ${namespace} with docId ${docId}`);
       return { vectorized: true, error: null };
     } catch (error) {
-      return handleError(error, "Failed to add document");
+      return handleError(error, 'Failed to add document');
     } finally {
       await session.close();
     }
   },
 
-  deleteDocumentFromNamespace: async function (namespace, docId) {
+  deleteDocumentFromNamespace: async function(namespace, docId) {
     const session = await this.getSession();
     try {
       log('log', `Attempting to delete document with docId ${docId} from ${namespace}`);
@@ -160,7 +160,7 @@ const Neo4jDB = {
       
       return deletedCount > 0;
     } catch (error) {
-      return handleError(error, "Failed to delete document");
+      return handleError(error, 'Failed to delete document');
     } finally {
       await session.close();
     }
@@ -169,30 +169,28 @@ const Neo4jDB = {
   listDocumentsInNamespace: function(namespace) {
     const session = this.getSession();
     return session.run(
-        `MATCH (d:Document:${namespace})
+      `MATCH (d:Document:${namespace})
        RETURN d.docId AS docId, d.pageContent AS pageContent, d.metadata AS metadata`
-      )
+    )
       .then((result) => {
         result.records.forEach((record) => {
           log(
-            "log",
-            `Doc ID: ${record.get("docId")}, Content: ${record.get("pageContent").substring(0, 50)}..., Metadata: ${record.get("metadata")}`
+            'log',
+            `Doc ID: ${record.get('docId')}, Content: ${record.get('pageContent').substring(0, 50)}..., Metadata: ${record.get('metadata')}`
           );
         });
-    })
-      .catch((error) =>
-        handleError(error, "Failed to list documents in namespace")
-      )
-    .finally(() => session.close());
+      })
+      .catch((error) => handleError(error, 'Failed to list documents in namespace'))
+      .finally(() => session.close());
   },
 
-  performSimilaritySearch: async function ({
+  performSimilaritySearch: async function({
     namespace,
     input,
     LLMConnector,
     similarityThreshold = 0.25,
     topN = 4,
-    filterFilters = []
+    filterFilters = [],
   }) {
     const session = await this.getSession();
     try {
@@ -224,35 +222,32 @@ const Neo4jDB = {
       const sourceDocuments = [];
       const scores = [];
 
-      result.records.forEach(record => {
-        contextTexts.push(record.get("contextText"));
-        const sourceDocument = JSON.parse(record.get("sourceDocument"));
+      result.records.forEach((record) => {
+        contextTexts.push(record.get('contextText'));
+        const sourceDocument = JSON.parse(record.get('sourceDocument'));
         sourceDocuments.push({
           ...sourceDocument,
-          text: record.get("contextText"),
+          text: record.get('contextText'),
         });
-        scores.push(record.get("similarity"));
+        scores.push(record.get('similarity'));
       });
 
       return {
         contextTexts,
         sources: sourceDocuments,
         scores,
-        message:
-          contextTexts.length === 0
-            ? `No results found for namespace ${namespace}`
-            : null,
+        message: contextTexts.length === 0 ? `No results found for namespace ${namespace}` : null,
       };
     } catch (error) {
-      return handleError(error, "Similarity search failed");
+      return handleError(error, 'Similarity search failed');
     } finally {
       await session.close();
     }
   },
 
-  namespaceStats: async function (reqBody = {}) {
+  namespaceStats: async function(reqBody = {}) {
     const { namespace = null } = reqBody;
-    if (!namespace) throw new Error("namespace required");
+    if (!namespace) throw new Error('namespace required');
 
     const session = await this.getSession();
     try {
@@ -261,18 +256,18 @@ const Neo4jDB = {
          RETURN count(d) as count`,
         { namespace }
       );
-      const count = result.records[0].get("count").toNumber();
+      const count = result.records[0].get('count').toNumber();
       return { vectorCount: count };
     } catch (error) {
-      return handleError(error, "Failed to get namespace stats");
+      return handleError(error, 'Failed to get namespace stats');
     } finally {
       await session.close();
     }
   },
 
-  deleteNamespace: async function (reqBody = {}) {
+  deleteNamespace: async function(reqBody = {}) {
     const { namespace = null } = reqBody;
-    if (!namespace) throw new Error("namespace required");
+    if (!namespace) throw new Error('namespace required');
 
     const session = await this.getSession();
     try {
@@ -282,28 +277,28 @@ const Neo4jDB = {
          RETURN count(d) as deletedCount`,
         { namespace }
       );
-      const deletedCount = result.records[0].get("deletedCount").toNumber();
+      const deletedCount = result.records[0].get('deletedCount').toNumber();
       return {
         message: `Namespace ${namespace} was deleted along with ${deletedCount} vectors.`,
       };
     } catch (error) {
-      return handleError(error, "Failed to delete namespace");
+      return handleError(error, 'Failed to delete namespace');
     } finally {
       await session.close();
     }
   },
 
-  reset: async function () {
+  reset: async function() {
     const session = await this.getSession();
     try {
-      await session.run("MATCH (n) DETACH DELETE n");
+      await session.run('MATCH (n) DETACH DELETE n');
       return { reset: true };
     } catch (error) {
-      return handleError(error, "Failed to reset database");
+      return handleError(error, 'Failed to reset database');
     } finally {
       await session.close();
     }
-  }
+  },
 };
 
 module.exports.Neo4jDB = Neo4jDB;
