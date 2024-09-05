@@ -156,7 +156,7 @@ const Neo4jDB = {
       // Erstellt einen neuen Knoten in der Datenbank
       await session.run(
         `CREATE (d:Document:${namespace} {
-          doc_id: $docId,
+          docId: $docId,
           pageContent: $pageContent,
           metadata: $metadata,
           embedding: $embedding
@@ -216,7 +216,7 @@ const Neo4jDB = {
     try {
       const result = await session.run(
         `MATCH (d:Document:${namespace})
-         RETURN d.doc_id AS docId, d.pageContent AS pageContent, d.metadata AS metadata`
+         RETURN d.docId AS docId, d.pageContent AS pageContent, d.metadata AS metadata`
       );
       result.records.forEach((record) => {
         console.log(`Doc ID: ${record.get("docId")}, Content: ${record.get("pageContent").substring(0, 50)}..., Metadata: ${record.get("metadata")}`);
@@ -265,7 +265,7 @@ const Neo4jDB = {
       async function logStoredEmbeddings(session, namespace) {
         try {
           const result = await session.run(
-            `MATCH (d:Document:${namespace}) RETURN d.doc_id AS docId, d.embedding AS embedding`
+            `MATCH (d:Document:${namespace}) RETURN d.docId AS docId, d.embedding AS embedding`
           );
           result.records.forEach((record) => {
             // console.log(
