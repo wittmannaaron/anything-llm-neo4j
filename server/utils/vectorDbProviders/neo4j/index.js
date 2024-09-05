@@ -169,15 +169,20 @@ const Neo4jDB = {
   listDocumentsInNamespace: function(namespace) {
     const session = this.getSession();
     return session.run(
-      `MATCH (d:Document:${namespace})
+        `MATCH (d:Document:${namespace})
        RETURN d.docId AS docId, d.pageContent AS pageContent, d.metadata AS metadata`
-    )
-    .then(result => {
-      result.records.forEach((record) => {
-        log('log', `Doc ID: ${record.get("docId")}, Content: ${record.get("pageContent").substring(0, 50)}..., Metadata: ${record.get("metadata")}`);
-      });
+      )
+      .then((result) => {
+        result.records.forEach((record) => {
+          log(
+            "log",
+            `Doc ID: ${record.get("docId")}, Content: ${record.get("pageContent").substring(0, 50)}..., Metadata: ${record.get("metadata")}`
+          );
+        });
     })
-    .catch(error => handleError(error, "Failed to list documents in namespace"))
+      .catch((error) =>
+        handleError(error, "Failed to list documents in namespace")
+      )
     .finally(() => session.close());
   },
 
@@ -222,7 +227,10 @@ const Neo4jDB = {
       result.records.forEach(record => {
         contextTexts.push(record.get("contextText"));
         const sourceDocument = JSON.parse(record.get("sourceDocument"));
-        sourceDocuments.push({ ...sourceDocument, text: record.get("contextText") });
+        sourceDocuments.push({
+          ...sourceDocument,
+          text: record.get("contextText"),
+        });
         scores.push(record.get("similarity"));
       });
 
@@ -230,7 +238,10 @@ const Neo4jDB = {
         contextTexts,
         sources: sourceDocuments,
         scores,
-        message: contextTexts.length === 0 ? `No results found for namespace ${namespace}` : null,
+        message:
+          contextTexts.length === 0
+            ? `No results found for namespace ${namespace}`
+            : null,
       };
     } catch (error) {
       return handleError(error, "Similarity search failed");
