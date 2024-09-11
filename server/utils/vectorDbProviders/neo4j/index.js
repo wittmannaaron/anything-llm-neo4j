@@ -279,6 +279,17 @@ const Neo4jDB = {
     debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterIdentifiers });
     const session = await this.getSession();
     try {
+      const namespaceCount = await this.namespaceCount(namespace);
+      if (namespaceCount === 0) {
+        debugLog('No documents found in namespace', { namespace });
+        return {
+          contextTexts: [],
+          sources: [],
+          scores: [],
+          message: `No documents found in namespace ${namespace}`,
+        };
+      }
+
       debugLog('Embedding input text');
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
@@ -286,13 +297,13 @@ const Neo4jDB = {
       debugLog('Executing similarity search query');
       const result = await session.run(
         `MATCH (c:Chunk:${namespace})
-         WHERE NOT c.docId IN $filterIdentifiers
-         WITH c, gds.similarity.cosine(c.embedding, $queryVector) AS similarity
-         WHERE similarity > $similarityThreshold
+         WHERE ALL(filter IN $filterIdentifiers WHERE NOT c.docId IN filter)
+         WITH c,
+         gds.similarity.cosine(c.embedding, $queryVector) AS similarity
          RETURN c.pageContent AS contextText, c.metadata AS sourceDocument, similarity
          ORDER BY similarity DESC
          LIMIT $topN`,
-        { namespace, queryVector, filterIdentifiers, similarityThreshold, topN: neo4j.int(topN) }
+        { namespace, queryVector, filterIdentifiers, topN: neo4j.int(topN) }
       );
       debugLog('Similarity search query executed', { recordCount: result.records.length });
 
