@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const neo4j = require('neo4j-driver');
 const { getEmbeddingEngineSelection } = require('../../helpers');
 
@@ -18,11 +16,7 @@ const Neo4jDB = {
 
   initialize: async function() {
     if (process.env.VECTOR_DB !== 'neo4j') {
-      throw new Error('Invalid ENV settings');
-    }
-
-    if (!process.env.NEO4J_URI || !process.env.NEO4J_USER || !process.env.NEO4J_PASSWORD) {
-      throw new Error('Missing required environment variables');
+      throw new Error('Neo4j::Invalid ENV settings');
     }
 
     log('log', 'Attempting connection with:', {
