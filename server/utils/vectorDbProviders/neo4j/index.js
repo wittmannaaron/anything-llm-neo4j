@@ -276,6 +276,8 @@ const Neo4jDB = {
     topN = 4,
     filterIdentifiers = [],
   }) {
+    console.log("[Neo4j Debug] performSimilaritySearch called with:", { namespace, input, similarityThreshold, topN,             
+      filterIdentifiers });
     debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterIdentifiers });
     const session = await this.getSession();
     try {
