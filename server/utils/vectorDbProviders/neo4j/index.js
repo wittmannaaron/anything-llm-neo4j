@@ -135,7 +135,6 @@ const Neo4jDB = {
           debugLog("Using cached vector information", { fullFilePath });
           const { chunks } = cacheResult;
           for (const chunk of chunks) {
-            debugLog('Sending query to create chunk from cache', { namespace, docId });
             const result = await session.run(
               `CREATE (c:Chunk:${namespace} {
                 docId: $docId,
@@ -153,8 +152,8 @@ const Neo4jDB = {
                 embedding: chunk.values
               }
             );
-            debugLog('Query result for cached chunk', result);
           }
+          debugLog(`Processed ${chunks.length} cached chunks`);
           return { vectorized: true, error: null };
         }
       }
@@ -183,11 +182,15 @@ const Neo4jDB = {
       const vectorValues = await EmbedderEngine.embedChunks(textChunks);
 
       if (vectorValues && vectorValues.length > 0) {
+        debugLog(`Processing ${vectorValues.length} chunks`);
         for (const [i, vector] of vectorValues.entries()) {
           const chunkId = uuidv4();
           const chunkMetadata = { ...metadata, text: textChunks[i] };
           
-          debugLog('Sending query to create chunk', { namespace, docId, chunkId });
+          if (i === 0 || i === vectorValues.length - 1) {
+            debugLog(`Processing chunk ${i + 1}/${vectorValues.length}`, { namespace, docId, chunkId });
+          }
+
           const result = await session.run(
             `CREATE (c:Chunk:${namespace} {
               docId: $docId,
@@ -205,10 +208,14 @@ const Neo4jDB = {
               embedding: vector
             }
           );
-          debugLog('Query result', result);
+
+          if (i === 0 || i === vectorValues.length - 1) {
+            debugLog(`Chunk ${i + 1} created`);
+          }
 
           vectors.push({ id: chunkId, values: vector, metadata: chunkMetadata });
         }
+        debugLog(`All ${vectorValues.length} chunks processed and added to the database`);
         await storeVectorResult([vectors], fullFilePath);
       } else {
         throw new Error("Could not embed document chunks!");
@@ -269,10 +276,14 @@ const Neo4jDB = {
     topN = 4,
     filterIdentifiers = [],
   }) {
+    debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterIdentifiers });
     const session = await this.getSession();
     try {
+      debugLog('Embedding input text');
       const queryVector = await LLMConnector.embedTextInput(input);
-      debugLog('Performing similarity search', { namespace, input, similarityThreshold, topN, filterIdentifiers });
+      debugLog('Input text embedded successfully');
+
+      debugLog('Executing similarity search query');
       const result = await session.run(
         `MATCH (c:Chunk:${namespace})
          WHERE NOT c.docId IN $filterIdentifiers
@@ -283,7 +294,7 @@ const Neo4jDB = {
          LIMIT $topN`,
         { namespace, queryVector, filterIdentifiers, similarityThreshold, topN: neo4j.int(topN) }
       );
-      debugLog('Similarity search result', result);
+      debugLog('Similarity search query executed', { recordCount: result.records.length });
 
       const contextTexts = [];
       const sourceDocuments = [];
