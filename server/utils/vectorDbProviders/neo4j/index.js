@@ -6,12 +6,19 @@ const { storeVectorResult, cachedVectorInformation } = require("../../files");
 const { toChunks, getEmbeddingEngineSelection } = require("../../helpers");
 const { sourceIdentifier } = require("../../chats");
 
+const debugLog = (message, data = null) => {
+  if (process.env.DEBUG_NEO4J === 'true') {
+    console.log(`[Neo4j Debug] ${message}`, data ? JSON.stringify(data, null, 2) : '');
+  }
+};
+
 const log = (level, message, ...args) => {
   console[level](`Neo4j::${message}`, ...args);
 };
 
 const handleError = (error, customMessage) => {
   log('error', `${customMessage} - ${error.message}`);
+  debugLog('Error', { customMessage, errorMessage: error.message });
   return { error: error.message };
 };
 
@@ -70,6 +77,7 @@ const Neo4jDB = {
     if (!this.driver) {
       await this.initialize();
     }
+    debugLog('New session created');
     return this.driver.session();
   },
 
@@ -119,21 +127,24 @@ const Neo4jDB = {
       const { pageContent, docId, ...metadata } = documentData;
       if (!pageContent || pageContent.length == 0) return false;
 
-      console.log("Adding new vectorized document into namespace", namespace);
+      debugLog("Adding new vectorized document into namespace", { namespace, docId });
 
       if (skipCache) {
         const cacheResult = await cachedVectorInformation(fullFilePath);
         if (cacheResult.exists) {
+          debugLog("Using cached vector information", { fullFilePath });
           const { chunks } = cacheResult;
           for (const chunk of chunks) {
-            await session.run(
+            debugLog('Sending query to create chunk from cache', { namespace, docId });
+            const result = await session.run(
               `CREATE (c:Chunk:${namespace} {
                 docId: $docId,
                 chunkId: $chunkId,
                 pageContent: $pageContent,
                 metadata: $metadata,
                 embedding: $embedding
-              })`,
+              })
+              RETURN c`,
               {
                 docId,
                 chunkId: uuidv4(),
@@ -142,6 +153,7 @@ const Neo4jDB = {
                 embedding: chunk.values
               }
             );
+            debugLog('Query result for cached chunk', result);
           }
           return { vectorized: true, error: null };
         }
@@ -166,7 +178,7 @@ const Neo4jDB = {
       });
       const textChunks = await textSplitter.splitText(pageContent);
 
-      console.log("Chunks created from document:", textChunks.length);
+      debugLog("Chunks created from document", { count: textChunks.length });
       const vectors = [];
       const vectorValues = await EmbedderEngine.embedChunks(textChunks);
 
@@ -175,14 +187,16 @@ const Neo4jDB = {
           const chunkId = uuidv4();
           const chunkMetadata = { ...metadata, text: textChunks[i] };
           
-          await session.run(
+          debugLog('Sending query to create chunk', { namespace, docId, chunkId });
+          const result = await session.run(
             `CREATE (c:Chunk:${namespace} {
               docId: $docId,
               chunkId: $chunkId,
               pageContent: $pageContent,
               metadata: $metadata,
               embedding: $embedding
-            })`,
+            })
+            RETURN c`,
             {
               docId,
               chunkId,
@@ -191,6 +205,7 @@ const Neo4jDB = {
               embedding: vector
             }
           );
+          debugLog('Query result', result);
 
           vectors.push({ id: chunkId, values: vector, metadata: chunkMetadata });
         }
@@ -201,6 +216,7 @@ const Neo4jDB = {
 
       return { vectorized: true, error: null };
     } catch (e) {
+      debugLog('Error in addDocumentToNamespace', e);
       console.error("addDocumentToNamespace", e.message);
       return { vectorized: false, error: e.message };
     } finally {
@@ -256,6 +272,7 @@ const Neo4jDB = {
     const session = await this.getSession();
     try {
       const queryVector = await LLMConnector.embedTextInput(input);
+      debugLog('Performing similarity search', { namespace, input, similarityThreshold, topN, filterIdentifiers });
       const result = await session.run(
         `MATCH (c:Chunk:${namespace})
          WHERE NOT c.docId IN $filterIdentifiers
@@ -266,6 +283,7 @@ const Neo4jDB = {
          LIMIT $topN`,
         { namespace, queryVector, filterIdentifiers, similarityThreshold, topN: neo4j.int(topN) }
       );
+      debugLog('Similarity search result', result);
 
       const contextTexts = [];
       const sourceDocuments = [];
@@ -277,6 +295,8 @@ const Neo4jDB = {
         scores.push(record.get('similarity'));
       });
 
+      debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
+
       return {
         contextTexts,
         sources: sourceDocuments,
@@ -284,6 +304,7 @@ const Neo4jDB = {
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace}` : null,
       };
     } catch (error) {
+      debugLog('Error in performSimilaritySearch', error);
       return handleError(error, 'Similarity search failed');
     } finally {
       await session.close();
