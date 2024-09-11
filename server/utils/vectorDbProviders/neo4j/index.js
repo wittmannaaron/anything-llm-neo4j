@@ -274,11 +274,10 @@ const Neo4jDB = {
     LLMConnector,
     similarityThreshold = 0.25,
     topN = 4,
-    filterIdentifiers = [],
+    filterFilters = [],
   }) {
-    console.log("[Neo4j Debug] performSimilaritySearch called with:", { namespace, input, similarityThreshold, topN,             
-      filterIdentifiers });
-    debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterIdentifiers });
+    console.log("[Neo4j Debug] performSimilaritySearch called with:", { namespace, input, similarityThreshold, topN, filterFilters });
+    debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters });
     const session = await this.getSession();
     try {
       const namespaceCount = await this.namespaceCount(namespace);
@@ -299,13 +298,13 @@ const Neo4jDB = {
       debugLog('Executing similarity search query');
       const result = await session.run(
         `MATCH (c:Chunk:${namespace})
-         WHERE ALL(filter IN $filterIdentifiers WHERE NOT c.docId IN filter)
+         WHERE ALL(filter IN $filterFilters WHERE NOT c.docId IN filter)
          WITH c,
          gds.similarity.cosine(c.embedding, $queryVector) AS similarity
          RETURN c.pageContent AS contextText, c.metadata AS sourceDocument, similarity
          ORDER BY similarity DESC
          LIMIT $topN`,
-        { namespace, queryVector, filterIdentifiers, topN: neo4j.int(topN) }
+        { namespace, queryVector, filterFilters, topN: neo4j.int(topN) }
       );
       debugLog('Similarity search query executed', { recordCount: result.records.length });
 
