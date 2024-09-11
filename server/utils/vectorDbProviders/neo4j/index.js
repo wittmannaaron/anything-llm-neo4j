@@ -301,10 +301,11 @@ const Neo4jDB = {
          WHERE ALL(filter IN $filterFilters WHERE NOT c.docId IN filter)
          WITH c,
          gds.similarity.cosine(c.embedding, $queryVector) AS similarity
+         WHERE similarity >= $similarityThreshold
          RETURN c.pageContent AS contextText, c.metadata AS sourceDocument, similarity
          ORDER BY similarity DESC
          LIMIT $topN`,
-        { namespace, queryVector, filterFilters, topN: neo4j.int(topN) }
+        { namespace, queryVector, filterFilters, topN: neo4j.int(topN), similarityThreshold }
       );
       debugLog('Similarity search query executed', { recordCount: result.records.length });
 
@@ -313,9 +314,12 @@ const Neo4jDB = {
       const scores = [];
 
       result.records.forEach(record => {
-        contextTexts.push(record.get('contextText'));
-        sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
-        scores.push(record.get('similarity'));
+        const similarity = record.get('similarity');
+        if (similarity >= similarityThreshold) {
+          contextTexts.push(record.get('contextText'));
+          sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
+          scores.push(similarity);
+        }
       });
 
       debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
@@ -324,7 +328,7 @@ const Neo4jDB = {
         contextTexts,
         sources: sourceDocuments,
         scores,
-        message: contextTexts.length === 0 ? `No results found for namespace ${namespace}` : null,
+        message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
     } catch (error) {
       debugLog('Error in performSimilaritySearch', error);
