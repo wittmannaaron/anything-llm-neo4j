@@ -393,6 +393,11 @@ const SystemSettings = {
       // AstraDB Keys
       AstraDBApplicationToken: process?.env?.ASTRA_DB_APPLICATION_TOKEN,
       AstraDBEndpoint: process?.env?.ASTRA_DB_ENDPOINT,
+
+      // Neo4j DB Keys
+      Neo4jUri: process.env.NEO4J_URI,
+      Neo4jUsername: process.env.NEO4J_USER,
+      Neo4jPassword: !!process.env.NEO4J_PASSWORD,
     };
   },
 

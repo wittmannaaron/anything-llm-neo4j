@@ -670,6 +670,7 @@ function supportedVectorDB(input = "") {
     "milvus",
     "zilliz",
     "astra",
+    "neo4j", // Added this line to include Neo4j
   ];
   return supported.includes(input)
     ? null

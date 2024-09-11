@@ -81,6 +81,9 @@ function getVectorDbClass() {
     case "astra":
       const { AstraDB } = require("../vectorDbProviders/astra");
       return AstraDB;
+    case "neo4j":
+      const { Neo4jDB } = require("../vectorDbProviders/neo4j");
+      return Neo4jDB;
     default:
       throw new Error("ENV: No VECTOR_DB value found in environment!");
   }

@@ -3,6 +3,7 @@ import Sidebar from "@/components/SettingsSidebar";
 import { isMobile } from "react-device-detect";
 import System from "@/models/system";
 import showToast from "@/utils/toast";
+import Neo4jDBLogo from "@/media/vectordbs/neo4j.png";
 import ChromaLogo from "@/media/vectordbs/chroma.png";
 import PineconeLogo from "@/media/vectordbs/pinecone.png";
 import LanceDbLogo from "@/media/vectordbs/lancedb.png";
@@ -15,6 +16,7 @@ import PreLoader from "@/components/Preloader";
 import ChangeWarningModal from "@/components/ChangeWarning";
 import { CaretUpDown, MagnifyingGlass, X } from "@phosphor-icons/react";
 import LanceDBOptions from "@/components/VectorDBSelection/LanceDBOptions";
+import Neo4jDBOptions from "@/components/VectorDBSelection/neo4jDBOptions";
 import ChromaDBOptions from "@/components/VectorDBSelection/ChromaDBOptions";
 import PineconeDBOptions from "@/components/VectorDBSelection/PineconeDBOptions";
 import QDrantDBOptions from "@/components/VectorDBSelection/QDrantDBOptions";
@@ -158,6 +160,13 @@ export default function GeneralVectorDatabase() {
       logo: MilvusLogo,
       options: <MilvusDBOptions settings={settings} />,
       description: "Open-source, highly scalable, and blazing fast.",
+    },
+    {
+      name: "Neo4jDB",
+      value: "neo4j",
+      logo: Neo4jDBLogo,
+      options: <Neo4jDBOptions settings={settings} />,
+      description: "Neo4j Graph Database",
     },
     {
       name: "AstraDB",
