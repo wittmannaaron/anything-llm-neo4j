@@ -1,5 +1,10 @@
 const neo4j = require('neo4j-driver');
-const { getEmbeddingEngineSelection } = require('../../helpers');
+const { TextSplitter } = require("../../TextSplitter");
+const { SystemSettings } = require("../../../models/systemSettings");
+const { v4: uuidv4 } = require("uuid");
+const { storeVectorResult, cachedVectorInformation } = require("../../files");
+const { toChunks, getEmbeddingEngineSelection } = require("../../helpers");
+const { sourceIdentifier } = require("../../chats");
 
 const log = (level, message, ...args) => {
   console[level](`Neo4j::${message}`, ...args);
@@ -108,31 +113,96 @@ const Neo4jDB = {
     }
   },
 
-  addDocumentToNamespace: async function(namespace, documentData) {
+  addDocumentToNamespace: async function(namespace, documentData, fullFilePath = null, skipCache = false) {
     const session = await this.getSession();
     try {
-      const { docId, pageContent, ...metadata } = documentData;
-      if (!docId || typeof docId !== 'string') {
-        throw new Error('Invalid or missing docId in document data');
+      const { pageContent, docId, ...metadata } = documentData;
+      if (!pageContent || pageContent.length == 0) return false;
+
+      console.log("Adding new vectorized document into namespace", namespace);
+
+      if (skipCache) {
+        const cacheResult = await cachedVectorInformation(fullFilePath);
+        if (cacheResult.exists) {
+          const { chunks } = cacheResult;
+          for (const chunk of chunks) {
+            await session.run(
+              `CREATE (c:Chunk:${namespace} {
+                docId: $docId,
+                chunkId: $chunkId,
+                pageContent: $pageContent,
+                metadata: $metadata,
+                embedding: $embedding
+              })`,
+              {
+                docId,
+                chunkId: uuidv4(),
+                pageContent: chunk.metadata.text,
+                metadata: JSON.stringify(chunk.metadata),
+                embedding: chunk.values
+              }
+            );
+          }
+          return { vectorized: true, error: null };
+        }
       }
 
-      const embedder = getEmbeddingEngineSelection();
-      const embedding = await embedder.embedTextInput(pageContent);
-      if (!embedding) {
-        throw new Error('Failed to generate embedding');
+      const EmbedderEngine = getEmbeddingEngineSelection();
+      const textSplitter = new TextSplitter({
+        chunkSize: TextSplitter.determineMaxChunkSize(
+          await SystemSettings.getValueOrFallback({
+            label: "text_splitter_chunk_size",
+          }),
+          EmbedderEngine?.embeddingMaxChunkLength
+        ),
+        chunkOverlap: await SystemSettings.getValueOrFallback(
+          { label: "text_splitter_chunk_overlap" },
+          20
+        ),
+        chunkHeaderMeta: {
+          sourceDocument: metadata?.title,
+          published: metadata?.published || "unknown",
+        },
+      });
+      const textChunks = await textSplitter.splitText(pageContent);
+
+      console.log("Chunks created from document:", textChunks.length);
+      const vectors = [];
+      const vectorValues = await EmbedderEngine.embedChunks(textChunks);
+
+      if (vectorValues && vectorValues.length > 0) {
+        for (const [i, vector] of vectorValues.entries()) {
+          const chunkId = uuidv4();
+          const chunkMetadata = { ...metadata, text: textChunks[i] };
+          
+          await session.run(
+            `CREATE (c:Chunk:${namespace} {
+              docId: $docId,
+              chunkId: $chunkId,
+              pageContent: $pageContent,
+              metadata: $metadata,
+              embedding: $embedding
+            })`,
+            {
+              docId,
+              chunkId,
+              pageContent: textChunks[i],
+              metadata: JSON.stringify(chunkMetadata),
+              embedding: vector
+            }
+          );
+
+          vectors.push({ id: chunkId, values: vector, metadata: chunkMetadata });
+        }
+        await storeVectorResult([vectors], fullFilePath);
+      } else {
+        throw new Error("Could not embed document chunks!");
       }
 
-      await session.run(
-        `CREATE (d:Document:${namespace} {
-          docId: $docId, pageContent: $pageContent, metadata: $metadata, embedding: $embedding
-        })`,
-        { docId, pageContent, metadata: JSON.stringify(metadata), embedding }
-      );
-
-      log('log', `Document added to ${namespace} with docId ${docId}`);
       return { vectorized: true, error: null };
-    } catch (error) {
-      return handleError(error, 'Failed to add document');
+    } catch (e) {
+      console.error("addDocumentToNamespace", e.message);
+      return { vectorized: false, error: e.message };
     } finally {
       await session.close();
     }
@@ -141,20 +211,17 @@ const Neo4jDB = {
   deleteDocumentFromNamespace: async function(namespace, docId) {
     const session = await this.getSession();
     try {
-      log('log', `Attempting to delete document with docId ${docId} from ${namespace}`);
-      
       const result = await session.run(
-        `MATCH (d:Document:${namespace} {docId: $docId})
-         DETACH DELETE d
-         RETURN count(d) as deletedCount`,
-        { docId }
+        `MATCH (c:Chunk:${namespace} {docId: $docId})
+         DETACH DELETE c
+         RETURN count(c) as deletedCount`,
+        { docId, namespace }
       );
       const deletedCount = result.records[0].get('deletedCount').toNumber();
-      log('log', `Deleted ${deletedCount} nodes with docId ${docId} from ${namespace}`);
-      
+      console.log(`Deleted ${deletedCount} chunks with docId ${docId} from ${namespace}`);
       return deletedCount > 0;
     } catch (error) {
-      return handleError(error, 'Failed to delete document');
+      return handleError(error, 'Failed to delete document chunks');
     } finally {
       await session.close();
     }
@@ -184,45 +251,29 @@ const Neo4jDB = {
     LLMConnector,
     similarityThreshold = 0.25,
     topN = 4,
-    filterFilters = [],
+    filterIdentifiers = [],
   }) {
     const session = await this.getSession();
     try {
-      const namespaceCount = await this.namespaceCount(namespace);
-      if (namespaceCount === 0) {
-        return {
-          contextTexts: [],
-          sourceDocuments: [],
-          scores: [],
-          message: `No documents found in namespace ${namespace}`,
-        };
-      }
-
       const queryVector = await LLMConnector.embedTextInput(input);
-      const limitValue = neo4j.int(Math.floor(topN));
-
       const result = await session.run(
-        `MATCH (d:Document:${namespace})                                                                                    
-         WHERE ALL(filter IN $filterFilters WHERE NOT d.docId IN filter)                                                   
-         WITH d,                                                                                                            
-         gds.similarity.cosine(d.embedding, $queryVector) AS similarity                                                     
-         RETURN d.pageContent AS contextText, d.metadata AS sourceDocument, similarity                                      
+        `MATCH (c:Chunk:${namespace})
+         WHERE NOT c.docId IN $filterIdentifiers
+         WITH c, gds.similarity.cosine(c.embedding, $queryVector) AS similarity
+         WHERE similarity > $similarityThreshold
+         RETURN c.pageContent AS contextText, c.metadata AS sourceDocument, similarity
          ORDER BY similarity DESC
-         LIMIT $limitValue`,
-        { namespace, queryVector, filterFilters, limitValue }
+         LIMIT $topN`,
+        { namespace, queryVector, filterIdentifiers, similarityThreshold, topN: neo4j.int(topN) }
       );
 
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
 
-      result.records.forEach((record) => {
+      result.records.forEach(record => {
         contextTexts.push(record.get('contextText'));
-        const sourceDocument = JSON.parse(record.get('sourceDocument'));
-        sourceDocuments.push({
-          ...sourceDocument,
-          text: record.get('contextText'),
-        });
+        sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
         scores.push(record.get('similarity'));
       });
 
