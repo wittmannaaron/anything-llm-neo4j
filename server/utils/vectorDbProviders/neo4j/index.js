@@ -168,7 +168,7 @@ const Neo4jDB = {
         return;
       }
 
-      // Versuchen, den Index zu erstellen oder zu aktualisieren
+      // Versuchen, den Index zu erstellen
       try {
         await session.run(`
           CALL db.index.vector.createNodeIndex(
@@ -181,20 +181,16 @@ const Neo4jDB = {
         `, { embeddingDim });
         console.log("Vector index created successfully.");
       } catch (indexError) {
-        // Wenn der Index bereits existiert, versuchen wir ihn zu aktualisieren
+        // Wenn der Index bereits existiert, ist das kein Problem
         if (indexError.message.includes("An equivalent index already exists")) {
-          console.log("Vector index already exists. Attempting to update...");
-          await session.run(`
-            CALL db.index.vector.updateNodeIndex('chunkEmbeddingIndex')
-          `);
-          console.log("Vector index updated successfully.");
+          console.log("Vector index already exists. No update needed as it updates automatically.");
         } else {
           // Wenn es ein anderer Fehler ist, werfen wir ihn weiter
           throw indexError;
         }
       }
     } catch (error) {
-      console.error("Error creating or updating vector index:", error);
+      console.error("Error creating vector index:", error);
     } finally {
       await session.close();
     }
