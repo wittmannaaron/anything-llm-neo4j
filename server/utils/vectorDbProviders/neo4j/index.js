@@ -71,7 +71,7 @@ const Neo4jDB = {
       }
       
       console.log(`Detected embedding dimension: ${embeddingDim}`);
-  
+
       // Schritt 1: Graphprojektion erstellen oder aktualisieren
       await session.run(`
         CALL gds.graph.project(
@@ -82,14 +82,14 @@ const Neo4jDB = {
             nodeProperties: {
               embedding: {
                 property: 'embedding',
-                defaultValue: toFloatArray(range(0, $embeddingDim).map(x => 0.0))
+                defaultValue: null
               }
             }
           }
         )
-      `, { embeddingDim: neo4j.int(embeddingDim) });
+      `);
       console.log('Graph projection created or updated');
-  
+
       // Schritt 2: KNN-Beziehungen berechnen
       await session.run(`
         CALL gds.knn.write(
