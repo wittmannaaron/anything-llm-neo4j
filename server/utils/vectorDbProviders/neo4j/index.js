@@ -44,10 +44,51 @@ const Neo4jDB = {
     try {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
-      await this.createEmbeddingIndex();
-      await this.updateGraphProjectionAndKNN(); // Neue Zeile
+      await this.createOrUpdateVectorIndex();
     } catch (error) {
       throw handleError(error, 'Connection failed');
+    }
+  },
+
+  getEmbeddingDimensions: async function() {
+    const session = await this.getSession();
+    try {
+      const result = await session.run(`
+        MATCH (c:Chunk)
+        WHERE c.embedding IS NOT NULL
+        WITH size(c.embedding) AS embeddingDim
+        LIMIT 1
+        RETURN embeddingDim
+      `);
+      return result.records[0]?.get('embeddingDim') || null;
+    } finally {
+      await session.close();
+    }
+  },
+
+  createOrUpdateVectorIndex: async function() {
+    const session = await this.getSession();
+    try {
+      const embeddingDim = await this.getEmbeddingDimensions();
+      if (!embeddingDim) {
+        console.log("No embeddings found. Skipping vector index creation.");
+        return;
+      }
+
+      await session.run(`
+        CALL db.index.vector.createNodeIndex(
+          'chunkEmbeddingIndex',
+          'Chunk',
+          'embedding',
+          $embeddingDim,
+          'cosine'
+        )
+      `, { embeddingDim });
+      console.log("Vector index created or updated successfully.");
+    } catch (error) {
+      console.error("Error creating or updating vector index:", error);
+    } finally {
+      await session.close();
     }
   },
 
@@ -206,8 +247,8 @@ const Neo4jDB = {
           }
           debugLog(`Processed ${chunks.length} cached chunks`);
           
-          // Neue Zeile: Aktualisiere Graph und KNN nach dem Hinzufügen von Chunks
-          await this.updateGraphProjectionAndKNN();
+          // Aktualisieren Sie den Vektorindex nach dem Hinzufügen neuer Chunks
+          await this.createOrUpdateVectorIndex();
           
           return { vectorized: true, error: null };
         }
@@ -273,15 +314,12 @@ const Neo4jDB = {
         debugLog(`All ${vectorValues.length} chunks processed and added to the database`);
         await storeVectorResult([vectors], fullFilePath);
         
-        // Neue Zeile: Aktualisiere Graph und KNN nach dem Hinzufügen aller Chunks
-        await this.updateGraphProjectionAndKNN();
+        // Aktualisieren Sie den Vektorindex nach dem Hinzufügen aller Chunks
+        await this.createOrUpdateVectorIndex();
         
       } else {
         throw new Error("Could not embed document chunks!");
       }
-  
-      // Call updateGraphProjectionAndKNN after adding new document
-      await this.updateGraphProjectionAndKNN();
   
       return { vectorized: true, error: null };
     } catch (e) {
@@ -338,7 +376,6 @@ const Neo4jDB = {
     topN = 4,
     filterFilters = [],
   }) {
-    console.log("[Neo4j Debug] performSimilaritySearch called with:", { namespace, input, similarityThreshold, topN, filterFilters });
     debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters });
     const session = await this.getSession();
     try {
@@ -357,64 +394,39 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
 
-      // Add query vector as a temporary node
-      const tempQueryResult = await session.run(
-        `CREATE (n:TempQuery {embedding: $queryVector}) RETURN id(n) AS nodeId`,
-        { queryVector }
-      );
-      const tempQueryNodeId = tempQueryResult.records[0].get('nodeId').toNumber();
-      debugLog('Temporary query node created', { nodeId: tempQueryNodeId });
-
-      debugLog('Executing KNN similarity search query');
+      debugLog('Executing vector similarity search query');
       const result = await session.run(
         `
-        MATCH (q:TempQuery)
-        WHERE id(q) = $tempQueryNodeId
-        CALL gds.knn.stream('chunkGraph', {
-          topK: $topK,
-          nodeProperties: ['embedding'],
-          concurrency: 1,
-          sampleRate: 1.0,
-          deltaThreshold: 0.0,
-          randomSeed: 42
-        })
-        YIELD node1, node2, similarity
-        WHERE id(node1) = $tempQueryNodeId AND node2:Chunk AND $namespace IN labels(node2)
-          AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
-          AND similarity >= $similarityThreshold
-        RETURN node2.pageContent AS contextText, node2.metadata AS sourceDocument, similarity
-        ORDER BY similarity DESC
+        CALL db.index.vector.queryNodes('chunkEmbeddingIndex', $topN, $queryVector)
+        YIELD node, score
+        WHERE $namespace IN labels(node)
+          AND ALL(filter IN $filterFilters WHERE NOT node.docId IN filter)
+          AND score >= $similarityThreshold
+        RETURN node.pageContent AS contextText, node.metadata AS sourceDocument, score AS similarity
+        ORDER BY score DESC
         LIMIT $topN
         `,
         {
           namespace,
           filterFilters,
-          topK: neo4j.int(topN * 3),
           topN: neo4j.int(topN),
-          similarityThreshold,
-          tempQueryNodeId: neo4j.int(tempQueryNodeId)
+          queryVector,
+          similarityThreshold
         }
       );
-      debugLog('KNN similarity search query executed', { recordCount: result.records.length });
+      debugLog('Vector similarity search query executed', { recordCount: result.records.length });
 
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
 
       result.records.forEach(record => {
-        const similarity = record.get('similarity');
-        if (similarity >= similarityThreshold) {
-          contextTexts.push(record.get('contextText'));
-          sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
-          scores.push(similarity);
-        }
+        contextTexts.push(record.get('contextText'));
+        sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
+        scores.push(record.get('similarity'));
       });
 
       debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
-
-      // Remove the temporary query node
-      await session.run(`MATCH (n:TempQuery) WHERE id(n) = $nodeId DELETE n`, { nodeId: neo4j.int(tempQueryNodeId) });
-      debugLog('Temporary query node removed');
 
       return {
         contextTexts,
@@ -463,8 +475,8 @@ const Neo4jDB = {
       console.log(`Deleted ${deletedCount} chunks with docId ${docId} from ${namespace}`);
       
       if (deletedCount > 0) {
-        // Call updateGraphProjectionAndKNN after successful deletion
-        await this.updateGraphProjectionAndKNN();
+        // Aktualisieren Sie den Vektorindex nach dem Löschen von Chunks
+        await this.createOrUpdateVectorIndex();
       }
       
       return deletedCount > 0;
