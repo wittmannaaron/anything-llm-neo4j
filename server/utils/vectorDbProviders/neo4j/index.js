@@ -168,15 +168,33 @@ const Neo4jDB = {
         return;
       }
 
-      await session.run(`
-        CALL db.index.vector.createNodeIndex(
-          'chunkEmbeddingIndex',
-          'Chunk',
-          'embedding',
-          $embeddingDim,
-          'cosine'
-        )
-      `, { embeddingDim });
+      // Überprüfen, ob der Index bereits existiert
+      const indexExists = await session.run(`
+        CALL db.indexes() YIELD name, labelsOrTypes, properties
+        WHERE name = 'chunkEmbeddingIndex'
+          AND labelsOrTypes = ['Chunk']
+          AND properties = ['embedding']
+        RETURN count(*) > 0 AS exists
+      `);
+
+      if (indexExists.records[0].get('exists')) {
+        // Index existiert bereits, versuchen wir ihn zu aktualisieren
+        console.log("Vector index already exists. Attempting to update...");
+        await session.run(`
+          CALL db.index.vector.updateNodeIndex('chunkEmbeddingIndex')
+        `);
+      } else {
+        // Index existiert nicht, erstellen wir einen neuen
+        await session.run(`
+          CALL db.index.vector.createNodeIndex(
+            'chunkEmbeddingIndex',
+            'Chunk',
+            'embedding',
+            $embeddingDim,
+            'cosine'
+          )
+        `, { embeddingDim });
+      }
       console.log("Vector index created or updated successfully.");
     } catch (error) {
       console.error("Error creating or updating vector index:", error);
