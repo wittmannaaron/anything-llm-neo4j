@@ -54,37 +54,52 @@ const Neo4jDB = {
   updateGraphProjectionAndKNN: async function () {
     const session = await this.getSession();
     try {
-      // Schritt 1: Graphprojektion aktualisieren oder erstellen
-      await session.run(`                                                                                               
-        CALL gds.graph.project.cypher(                                                                                  
-          'chunkGraph',                                                                                                 
-          'MATCH (c:Chunk) RETURN id(c) AS id',                                                                         
-          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS       
-  weight',                                                                                                              
-          {                                                                                                             
-            nodeProperties: {                                                                                           
-              embedding: {                                                                                              
-                property: 'embedding',                                                                                  
-                defaultValue: null                                                                                      
-              }                                                                                                         
-            }                                                                                                           
-          }                                                                                                             
-        )                                                                                                               
+      // Schritt 0: Prüfen, ob der Graph existiert und ihn gegebenenfalls löschen
+      const graphExistsResult = await session.run(`
+        CALL gds.graph.exists('chunkGraph')
+        YIELD exists
+        RETURN exists
       `);
-      console.log("Graph projection updated or created");
+      const graphExists = graphExistsResult.records[0].get('exists');
+
+      if (graphExists) {
+        await session.run(`
+          CALL gds.graph.drop('chunkGraph')
+          YIELD graphName
+        `);
+        console.log("Existing graph dropped");
+      }
+
+      // Schritt 1: Graphprojektion erstellen
+      await session.run(`
+        CALL gds.graph.project.cypher(
+          'chunkGraph',
+          'MATCH (c:Chunk) RETURN id(c) AS id',
+          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight',
+          {
+            nodeProperties: {
+              embedding: {
+                property: 'embedding',
+                defaultValue: null
+              }
+            }
+          }
+        )
+      `);
+      console.log("Graph projection created");
 
       // Schritt 2: KNN-Beziehungen berechnen
-      await session.run(`                                                                                               
-        CALL gds.knn.write(                                                                                             
-          'chunkGraph',                                                                                                 
-          {                                                                                                             
-            topK: 5,                                                                                                    
-            nodeProperties: ['embedding'],                                                                              
-            similarityCutoff: 0.5,                                                                                      
-            writeRelationshipType: 'SIMILAR_TO',                                                                        
-            writeProperty: 'similarity'                                                                                 
-          }                                                                                                             
-        )                                                                                                               
+      await session.run(`
+        CALL gds.knn.write(
+          'chunkGraph',
+          {
+            topK: 5,
+            nodeProperties: ['embedding'],
+            similarityCutoff: 0.5,
+            writeRelationshipType: 'SIMILAR_TO',
+            writeProperty: 'similarity'
+          }
+        )
       `);
       console.log("KNN relationships calculated and written");
     } catch (error) {
@@ -273,6 +288,9 @@ const Neo4jDB = {
         throw new Error("Could not embed document chunks!");
       }
   
+      // Call updateGraphProjectionAndKNN after adding new document
+      await this.updateGraphProjectionAndKNN();
+  
       return { vectorized: true, error: null };
     } catch (e) {
       debugLog('Error in addDocumentToNamespace', e);
@@ -446,7 +464,7 @@ const Neo4jDB = {
       console.log(`Deleted ${deletedCount} chunks with docId ${docId} from ${namespace}`);
       
       if (deletedCount > 0) {
-        // Neue Zeile: Aktualisiere Graph und KNN nach erfolgreicher Löschung
+        // Call updateGraphProjectionAndKNN after successful deletion
         await this.updateGraphProjectionAndKNN();
       }
       
