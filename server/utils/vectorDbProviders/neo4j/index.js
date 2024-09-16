@@ -352,18 +352,19 @@ const Neo4jDB = {
           message: `No chunks found in namespace ${namespace}`,
         };
       }
-  
+
       debugLog('Embedding input text');
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
-  
+
       // Add query vector as a temporary node
-      await session.run(
-        `CREATE (:TempQuery {id: 0, embedding: $queryVector})`,
+      const tempQueryResult = await session.run(
+        `CREATE (n:TempQuery {embedding: $queryVector}) RETURN id(n) AS nodeId`,
         { queryVector }
       );
-      debugLog('Temporary query node created');
-  
+      const tempQueryNodeId = tempQueryResult.records[0].get('nodeId').toNumber();
+      debugLog('Temporary query node created', { nodeId: tempQueryNodeId });
+
       debugLog('Executing KNN similarity search query');
       const result = await session.run(
         `
@@ -376,7 +377,7 @@ const Neo4jDB = {
           randomSeed: 42
         })
         YIELD node1, node2, similarity
-        WHERE id(node1) = 0 AND node2:Chunk:${namespace}
+        WHERE id(node1) = $tempQueryNodeId AND node2:Chunk AND node2:${namespace}
           AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
           AND similarity >= $similarityThreshold
         RETURN node2.pageContent AS contextText, node2.metadata AS sourceDocument, similarity
@@ -386,17 +387,18 @@ const Neo4jDB = {
         {
           namespace,
           filterFilters,
-          topK: neo4j.int(topN * 3), // We get more results and filter later
+          topK: neo4j.int(topN * 3),
           topN: neo4j.int(topN),
-          similarityThreshold
+          similarityThreshold,
+          tempQueryNodeId: neo4j.int(tempQueryNodeId)
         }
       );
       debugLog('KNN similarity search query executed', { recordCount: result.records.length });
-  
+
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
-  
+
       result.records.forEach(record => {
         const similarity = record.get('similarity');
         if (similarity >= similarityThreshold) {
@@ -405,13 +407,13 @@ const Neo4jDB = {
           scores.push(similarity);
         }
       });
-  
+
       debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
-  
+
       // Remove the temporary query node
-      await session.run(`MATCH (n:TempQuery {id: 0}) DELETE n`);
+      await session.run(`MATCH (n:TempQuery) WHERE id(n) = $nodeId DELETE n`, { nodeId: neo4j.int(tempQueryNodeId) });
       debugLog('Temporary query node removed');
-  
+
       return {
         contextTexts,
         sources: sourceDocuments,
