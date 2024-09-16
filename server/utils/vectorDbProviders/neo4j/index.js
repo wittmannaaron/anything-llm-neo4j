@@ -357,28 +357,41 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
   
-      debugLog('Executing enhanced similarity search query');
+      // Add query vector as a temporary node
+      await session.run(
+        `CREATE (:TempQuery {id: 0, embedding: $queryVector})`,
+        { queryVector }
+      );
+      debugLog('Temporary query node created');
+  
+      debugLog('Executing KNN similarity search query');
       const result = await session.run(
         `
-        CALL gds.alpha.ml.ann.search('chunkGraph', $queryVector, $initialTopK)
-        YIELD node, score
-        MATCH (node:Chunk:${namespace})
-        WHERE ALL(filter IN $filterFilters WHERE NOT node.docId IN filter)
-          AND score >= $similarityThreshold
-        RETURN node.pageContent AS contextText, node.metadata AS sourceDocument, score AS similarity
+        CALL gds.knn.stream('chunkGraph', {
+          topK: $topK,
+          nodeProperties: ['embedding'],
+          concurrency: 1,
+          sampleRate: 1.0,
+          deltaThreshold: 0.0,
+          randomSeed: 42
+        })
+        YIELD node1, node2, similarity
+        WHERE id(node1) = 0 AND node2:Chunk:${namespace}
+          AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
+          AND similarity >= $similarityThreshold
+        RETURN node2.pageContent AS contextText, node2.metadata AS sourceDocument, similarity
         ORDER BY similarity DESC
         LIMIT $topN
         `,
         {
           namespace,
-          queryVector,
           filterFilters,
-          initialTopK: neo4j.int(topN * 3),  // Initial ANN search
+          topK: neo4j.int(topN * 3), // We get more results and filter later
           topN: neo4j.int(topN),
           similarityThreshold
         }
       );
-      debugLog('Enhanced similarity search query executed', { recordCount: result.records.length });
+      debugLog('KNN similarity search query executed', { recordCount: result.records.length });
   
       const contextTexts = [];
       const sourceDocuments = [];
@@ -394,6 +407,10 @@ const Neo4jDB = {
       });
   
       debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
+  
+      // Remove the temporary query node
+      await session.run(`MATCH (n:TempQuery {id: 0}) DELETE n`);
+      debugLog('Temporary query node removed');
   
       return {
         contextTexts,
