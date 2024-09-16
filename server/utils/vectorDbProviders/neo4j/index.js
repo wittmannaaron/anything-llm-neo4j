@@ -360,25 +360,12 @@ const Neo4jDB = {
       debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
-        CALL gds.knn.stream('chunkGraph', {
-          topK: $topK,
-          nodeProperties: ['embedding'],
-          relationshipTypes: ['SIMILAR_TO'],
-          sampleRate: 1.0,
-          concurrency: 1,
-          randomSeed: 42
-        })
-        YIELD node1, node2, similarity
-        WITH node1, node2, similarity
-        WHERE id(node1) IN gds.util.asNodeIds(gds.alpha.ml.ann.search(
-          'chunkGraph',
-          $queryVector,
-          $initialTopK
-        ))
-        MATCH (node1:Chunk:${namespace})
-        WHERE ALL(filter IN $filterFilters WHERE NOT node1.docId IN filter)
-          AND similarity >= $similarityThreshold
-        RETURN node1.pageContent AS contextText, node1.metadata AS sourceDocument, similarity
+        CALL gds.alpha.ml.ann.search('chunkGraph', $queryVector, $initialTopK)
+        YIELD node, score
+        MATCH (node:Chunk:${namespace})
+        WHERE ALL(filter IN $filterFilters WHERE NOT node.docId IN filter)
+          AND score >= $similarityThreshold
+        RETURN node.pageContent AS contextText, node.metadata AS sourceDocument, score AS similarity
         ORDER BY similarity DESC
         LIMIT $topN
         `,
@@ -386,8 +373,7 @@ const Neo4jDB = {
           namespace,
           queryVector,
           filterFilters,
-          topK: neo4j.int(topN * 2),  // We get more results and filter later
-          initialTopK: neo4j.int(topN * 3),  // Initial ANN search to seed the graph traversal
+          initialTopK: neo4j.int(topN * 3),  // Initial ANN search
           topN: neo4j.int(topN),
           similarityThreshold
         }
