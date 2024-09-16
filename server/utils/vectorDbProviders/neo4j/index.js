@@ -45,8 +45,51 @@ const Neo4jDB = {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
       await this.createOrUpdateVectorIndex();
+      await this.createGraphProjection();
+      await this.createKNNRelationships();
     } catch (error) {
       throw handleError(error, 'Connection failed');
+    }
+  },
+
+  createGraphProjection: async function() {
+    const session = await this.getSession();
+    try {
+      await session.run(`
+        CALL gds.graph.project(
+          'chunkGraph',
+          'Chunk',
+          '*',
+          {
+            nodeProperties: ['embedding']
+          }
+        )
+      `);
+      console.log("Graph projection created successfully.");
+    } catch (error) {
+      console.error("Error creating graph projection:", error);
+    } finally {
+      await session.close();
+    }
+  },
+
+  createKNNRelationships: async function(k = 5) {
+    const session = await this.getSession();
+    try {
+      await session.run(`
+        CALL gds.knn.write('chunkGraph', {
+          topK: $k,
+          nodeProperties: ['embedding'],
+          writeRelationshipType: 'SIMILAR_TO',
+          writeProperty: 'similarity',
+          concurrency: 4
+        })
+      `, { k: neo4j.int(k) });
+      console.log("KNN relationships created successfully.");
+    } catch (error) {
+      console.error("Error creating KNN relationships:", error);
+    } finally {
+      await session.close();
     }
   },
 
@@ -247,8 +290,10 @@ const Neo4jDB = {
           }
           debugLog(`Processed ${chunks.length} cached chunks`);
           
-          // Aktualisieren Sie den Vektorindex nach dem Hinzufügen neuer Chunks
+          // Aktualisieren Sie den Vektorindex und die Graph-Projektion nach dem Hinzufügen neuer Chunks
           await this.createOrUpdateVectorIndex();
+          await this.createGraphProjection();
+          await this.createKNNRelationships();
           
           return { vectorized: true, error: null };
         }
@@ -314,8 +359,10 @@ const Neo4jDB = {
         debugLog(`All ${vectorValues.length} chunks processed and added to the database`);
         await storeVectorResult([vectors], fullFilePath);
         
-        // Aktualisieren Sie den Vektorindex nach dem Hinzufügen aller Chunks
+        // Aktualisieren Sie den Vektorindex, die Graph-Projektion und KNN-Beziehungen nach dem Hinzufügen aller Chunks
         await this.createOrUpdateVectorIndex();
+        await this.createGraphProjection();
+        await this.createKNNRelationships();
         
       } else {
         throw new Error("Could not embed document chunks!");
@@ -368,15 +415,16 @@ const Neo4jDB = {
       .finally(() => session.close());
   },
 
-  performSimilaritySearch: async function({
+  performEnhancedSimilaritySearch: async function({
     namespace,
     input,
     LLMConnector,
     similarityThreshold = 0.25,
     topN = 4,
     filterFilters = [],
+    knnDepth = 2
   }) {
-    debugLog('performSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters });
+    debugLog('performEnhancedSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters, knnDepth });
     const session = await this.getSession();
     try {
       const namespaceCount = await this.namespaceCount(namespace);
@@ -394,52 +442,92 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
 
-      debugLog('Executing vector similarity search query');
+      debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
-        CALL db.index.vector.queryNodes('chunkEmbeddingIndex', $topN, $queryVector)
-        YIELD node, score
-        WHERE $namespace IN labels(node)
-          AND ALL(filter IN $filterFilters WHERE NOT node.docId IN filter)
-          AND score >= $similarityThreshold
-        RETURN node.pageContent AS contextText, node.metadata AS sourceDocument, score AS similarity
-        ORDER BY score DESC
+        CALL gds.knn.stream('chunkGraph', {
+          topK: $topN,
+          nodeProperties: ['embedding'],
+          similarityMetric: 'cosine'
+        })
+        YIELD node1, node2, similarity
+        WHERE $namespace IN labels(node2)
+          AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
+          AND similarity >= $similarityThreshold
+        WITH node2, similarity
+        MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
+        WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
+        WITH node2, similarity AS directSimilarity,
+             collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
+        WITH node2, directSimilarity,
+             relatedNodes,
+             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore
+        WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
+             directSimilarity, avgKNNScore, relatedNodes
+        ORDER BY combinedScore DESC
         LIMIT $topN
+        RETURN node2.pageContent AS contextText,
+               node2.metadata AS sourceDocument,
+               directSimilarity AS vectorSimilarity,
+               avgKNNScore AS knnSimilarity,
+               combinedScore,
+               [x IN relatedNodes | x.node.pageContent] AS relatedContexts
         `,
         {
           namespace,
           filterFilters,
-          topN: neo4j.int(topN),
+          topN: neo4j.int(topN * 3),
           queryVector,
           similarityThreshold
         }
       );
-      debugLog('Vector similarity search query executed', { recordCount: result.records.length });
+      debugLog('Enhanced similarity search query executed', { recordCount: result.records.length });
 
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
+      const relatedContexts = [];
 
       result.records.forEach(record => {
         contextTexts.push(record.get('contextText'));
         sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
-        scores.push(record.get('similarity'));
+        scores.push(record.get('combinedScore'));
+        relatedContexts.push(record.get('relatedContexts'));
       });
 
-      debugLog('Processed similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
+      debugLog('Processed enhanced similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
 
       return {
         contextTexts,
         sources: sourceDocuments,
         scores,
+        relatedContexts,
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
     } catch (error) {
-      debugLog('Error in performSimilaritySearch', error);
-      return handleError(error, 'Similarity search failed');
+      debugLog('Error in performEnhancedSimilaritySearch', error);
+      return handleError(error, 'Enhanced similarity search failed');
     } finally {
       await session.close();
     }
+  },
+
+  performSimilaritySearch: async function({
+    namespace,
+    input,
+    LLMConnector,
+    similarityThreshold = 0.25,
+    topN = 4,
+    filterFilters = [],
+  }) {
+    return this.performEnhancedSimilaritySearch({
+      namespace,
+      input,
+      LLMConnector,
+      similarityThreshold,
+      topN,
+      filterFilters,
+    });
   },
 
   namespaceStats: async function(reqBody = {}) {
@@ -475,8 +563,10 @@ const Neo4jDB = {
       console.log(`Deleted ${deletedCount} chunks with docId ${docId} from ${namespace}`);
       
       if (deletedCount > 0) {
-        // Aktualisieren Sie den Vektorindex nach dem Löschen von Chunks
+        // Aktualisieren Sie den Vektorindex, die Graph-Projektion und KNN-Beziehungen nach dem Löschen von Chunks
         await this.createOrUpdateVectorIndex();
+        await this.createGraphProjection();
+        await this.createKNNRelationships();
       }
       
       return deletedCount > 0;
