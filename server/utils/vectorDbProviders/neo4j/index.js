@@ -379,7 +379,7 @@ const Neo4jDB = {
           randomSeed: 42
         })
         YIELD node1, node2, similarity
-        WHERE node1 = q AND node2:Chunk AND $namespace IN labels(node2)
+        WHERE id(node1) = $tempQueryNodeId AND node2:Chunk AND $namespace IN labels(node2)
           AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
           AND similarity >= $similarityThreshold
         RETURN node2.pageContent AS contextText, node2.metadata AS sourceDocument, similarity
