@@ -168,23 +168,8 @@ const Neo4jDB = {
         return;
       }
 
-      // Überprüfen, ob der Index bereits existiert
-      const indexExists = await session.run(`
-        CALL db.indexes() YIELD name, labelsOrTypes, properties
-        WHERE name = 'chunkEmbeddingIndex'
-          AND labelsOrTypes = ['Chunk']
-          AND properties = ['embedding']
-        RETURN count(*) > 0 AS exists
-      `);
-
-      if (indexExists.records[0].get('exists')) {
-        // Index existiert bereits, versuchen wir ihn zu aktualisieren
-        console.log("Vector index already exists. Attempting to update...");
-        await session.run(`
-          CALL db.index.vector.updateNodeIndex('chunkEmbeddingIndex')
-        `);
-      } else {
-        // Index existiert nicht, erstellen wir einen neuen
+      // Versuchen, den Index zu erstellen oder zu aktualisieren
+      try {
         await session.run(`
           CALL db.index.vector.createNodeIndex(
             'chunkEmbeddingIndex',
@@ -194,8 +179,20 @@ const Neo4jDB = {
             'cosine'
           )
         `, { embeddingDim });
+        console.log("Vector index created successfully.");
+      } catch (indexError) {
+        // Wenn der Index bereits existiert, versuchen wir ihn zu aktualisieren
+        if (indexError.message.includes("An equivalent index already exists")) {
+          console.log("Vector index already exists. Attempting to update...");
+          await session.run(`
+            CALL db.index.vector.updateNodeIndex('chunkEmbeddingIndex')
+          `);
+          console.log("Vector index updated successfully.");
+        } else {
+          // Wenn es ein anderer Fehler ist, werfen wir ihn weiter
+          throw indexError;
+        }
       }
-      console.log("Vector index created or updated successfully.");
     } catch (error) {
       console.error("Error creating or updating vector index:", error);
     } finally {
