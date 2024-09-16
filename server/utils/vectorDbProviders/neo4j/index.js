@@ -51,61 +51,44 @@ const Neo4jDB = {
     }
   },
 
-  updateGraphProjectionAndKNN: async function() {
+  updateGraphProjectionAndKNN: async function () {
     const session = await this.getSession();
     try {
-      // Schritt 0: Dynamische Ermittlung der Vektorgröße
-      const embeddingDimResult = await session.run(`
-        MATCH (c:Chunk) 
-        WHERE c.embedding IS NOT NULL 
-        WITH size(c.embedding) AS embeddingDim 
-        LIMIT 1
-        RETURN embeddingDim
+      // Schritt 1: Graphprojektion aktualisieren oder erstellen
+      await session.run(`                                                                                               
+        CALL gds.graph.project.cypher(                                                                                  
+          'chunkGraph',                                                                                                 
+          'MATCH (c:Chunk) RETURN id(c) AS id',                                                                         
+          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS       
+  weight',                                                                                                              
+          {                                                                                                             
+            nodeProperties: {                                                                                           
+              embedding: {                                                                                              
+                property: 'embedding',                                                                                  
+                defaultValue: null                                                                                      
+              }                                                                                                         
+            }                                                                                                           
+          }                                                                                                             
+        )                                                                                                               
       `);
-      
-      const embeddingDim = embeddingDimResult.records[0]?.get('embeddingDim');
-      
-      if (!embeddingDim) {
-        console.log('No embeddings found in the database. Skipping graph projection and KNN calculation.');
-        return;
-      }
-      
-      console.log(`Detected embedding dimension: ${embeddingDim}`);
-
-      // Schritt 1: Graphprojektion erstellen oder aktualisieren
-      await session.run(`
-        CALL gds.graph.project(
-          'chunkGraph',
-          'Chunk',
-          '*',
-          {
-            nodeProperties: {
-              embedding: {
-                property: 'embedding',
-                defaultValue: null
-              }
-            }
-          }
-        )
-      `);
-      console.log('Graph projection created or updated');
+      console.log("Graph projection updated or created");
 
       // Schritt 2: KNN-Beziehungen berechnen
-      await session.run(`
-        CALL gds.knn.write(
-          'chunkGraph',
-          {
-            topK: 5,
-            nodeProperties: ['embedding'],
-            similarityCutoff: 0.5,
-            writeRelationshipType: 'SIMILAR_TO',
-            writeProperty: 'similarity'
-          }
-        )
+      await session.run(`                                                                                               
+        CALL gds.knn.write(                                                                                             
+          'chunkGraph',                                                                                                 
+          {                                                                                                             
+            topK: 5,                                                                                                    
+            nodeProperties: ['embedding'],                                                                              
+            similarityCutoff: 0.5,                                                                                      
+            writeRelationshipType: 'SIMILAR_TO',                                                                        
+            writeProperty: 'similarity'                                                                                 
+          }                                                                                                             
+        )                                                                                                               
       `);
-      console.log('KNN relationships calculated and written');
+      console.log("KNN relationships calculated and written");
     } catch (error) {
-      console.error('Error updating graph projection and KNN:', error);
+      console.error("Error updating graph projection and KNN:", error);
     } finally {
       await session.close();
     }
