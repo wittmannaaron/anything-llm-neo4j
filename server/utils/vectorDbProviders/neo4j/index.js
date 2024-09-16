@@ -44,9 +44,7 @@ const Neo4jDB = {
     try {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
-      await this.createOrUpdateVectorIndex();
-      await this.createGraphProjection();
-      await this.createKNNRelationships();
+      await this.updateGraphAndRelationships();
     } catch (error) {
       throw handleError(error, 'Connection failed');
     }
@@ -55,27 +53,73 @@ const Neo4jDB = {
   createGraphProjection: async function() {
     const session = await this.getSession();
     try {
-      await session.run(`
-        CALL gds.graph.project(
-          'chunkGraph',
-          'Chunk',
-          '*',
-          {
-            nodeProperties: ['embedding']
-          }
-        )
+      // Prüfen, ob der Graph bereits existiert
+      const existsResult = await session.run(`
+        CALL gds.graph.exists('chunkGraph')
+        YIELD exists
       `);
-      console.log("Graph projection created successfully.");
+      const graphExists = existsResult.records[0].get('exists');
+
+      if (graphExists) {
+        // Versuchen, den Graphen zu aktualisieren
+        try {
+          await session.run(`
+            CALL gds.graph.project.cypher(
+              'chunkGraph',
+              'MATCH (c:Chunk) RETURN id(c) AS id, c.embedding AS embedding',
+              'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight',
+              {
+                nodeProperties: ['embedding'],
+                relationshipProperties: ['similarity']
+              }
+            )
+          `);
+          console.log("Graph projection updated successfully.");
+        } catch (updateError) {
+          // Wenn das Update fehlschlägt, löschen wir den Graphen und erstellen ihn neu
+          console.log("Failed to update graph. Dropping and recreating...");
+          await session.run(`
+            CALL gds.graph.drop('chunkGraph')
+            YIELD graphName
+          `);
+          await this.createNewGraphProjection(session);
+        }
+      } else {
+        // Wenn der Graph nicht existiert, erstellen wir ihn neu
+        await this.createNewGraphProjection(session);
+      }
     } catch (error) {
-      console.error("Error creating graph projection:", error);
+      console.error("Error in graph projection process:", error);
     } finally {
       await session.close();
     }
   },
 
+  createNewGraphProjection: async function(session) {
+    await session.run(`
+      CALL gds.graph.project(
+        'chunkGraph',
+        'Chunk',
+        '*',
+        {
+          nodeProperties: ['embedding']
+        }
+      )
+    `);
+    console.log("New graph projection created successfully.");
+  },
+
   createKNNRelationships: async function(k = 5) {
     const session = await this.getSession();
     try {
+      // Zuerst alle bestehenden SIMILAR_TO Beziehungen löschen
+      await session.run(`
+        MATCH ()-[r:SIMILAR_TO]->()
+        DELETE r
+      `);
+      console.log("Existing KNN relationships deleted.");
+
+      // Dann neue KNN-Beziehungen erstellen
       await session.run(`
         CALL gds.knn.write('chunkGraph', {
           topK: $k,
@@ -85,12 +129,18 @@ const Neo4jDB = {
           concurrency: 4
         })
       `, { k: neo4j.int(k) });
-      console.log("KNN relationships created successfully.");
+      console.log("New KNN relationships created successfully.");
     } catch (error) {
       console.error("Error creating KNN relationships:", error);
     } finally {
       await session.close();
     }
+  },
+
+  updateGraphAndRelationships: async function() {
+    await this.createOrUpdateVectorIndex();
+    await this.createGraphProjection();
+    await this.createKNNRelationships();
   },
 
   getEmbeddingDimensions: async function() {
@@ -290,10 +340,8 @@ const Neo4jDB = {
           }
           debugLog(`Processed ${chunks.length} cached chunks`);
           
-          // Aktualisieren Sie den Vektorindex und die Graph-Projektion nach dem Hinzufügen neuer Chunks
-          await this.createOrUpdateVectorIndex();
-          await this.createGraphProjection();
-          await this.createKNNRelationships();
+          // Aktualisieren Sie den Graph und die Beziehungen nach dem Hinzufügen neuer Chunks
+          await this.updateGraphAndRelationships();
           
           return { vectorized: true, error: null };
         }
@@ -359,10 +407,8 @@ const Neo4jDB = {
         debugLog(`All ${vectorValues.length} chunks processed and added to the database`);
         await storeVectorResult([vectors], fullFilePath);
         
-        // Aktualisieren Sie den Vektorindex, die Graph-Projektion und KNN-Beziehungen nach dem Hinzufügen aller Chunks
-        await this.createOrUpdateVectorIndex();
-        await this.createGraphProjection();
-        await this.createKNNRelationships();
+        // Aktualisieren Sie den Graph und die Beziehungen nach dem Hinzufügen aller Chunks
+        await this.updateGraphAndRelationships();
         
       } else {
         throw new Error("Could not embed document chunks!");
@@ -563,10 +609,8 @@ const Neo4jDB = {
       console.log(`Deleted ${deletedCount} chunks with docId ${docId} from ${namespace}`);
       
       if (deletedCount > 0) {
-        // Aktualisieren Sie den Vektorindex, die Graph-Projektion und KNN-Beziehungen nach dem Löschen von Chunks
-        await this.createOrUpdateVectorIndex();
-        await this.createGraphProjection();
-        await this.createKNNRelationships();
+        // Aktualisieren Sie den Graph und die Beziehungen nach dem Löschen von Chunks
+        await this.updateGraphAndRelationships();
       }
       
       return deletedCount > 0;
