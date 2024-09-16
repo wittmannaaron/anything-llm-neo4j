@@ -74,16 +74,8 @@ const Neo4jDB = {
       await session.run(`
         CALL gds.graph.project.cypher(
           'chunkGraph',
-          'MATCH (c:Chunk) RETURN id(c) AS id',
-          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight',
-          {
-            nodeProperties: {
-              embedding: {
-                property: 'embedding',
-                defaultValue: null
-              }
-            }
-          }
+          'MATCH (c:Chunk) RETURN id(c) AS id, c.embedding AS embedding',
+          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight'
         )
       `);
       console.log("Graph projection created");
