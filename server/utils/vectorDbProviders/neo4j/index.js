@@ -368,8 +368,8 @@ const Neo4jDB = {
           concurrency: 1,
           randomSeed: 42
         })
-        YIELD node1, node2, score
-        WITH node1, node2, score
+        YIELD node1, node2, similarity
+        WITH node1, node2, similarity
         WHERE id(node1) IN gds.util.asNodeIds(gds.alpha.ml.ann.search(
           'chunkGraph',
           $queryVector,
@@ -377,8 +377,8 @@ const Neo4jDB = {
         ))
         MATCH (node1:Chunk:${namespace})
         WHERE ALL(filter IN $filterFilters WHERE NOT node1.docId IN filter)
-          AND score >= $similarityThreshold
-        RETURN node1.pageContent AS contextText, node1.metadata AS sourceDocument, score AS similarity
+          AND similarity >= $similarityThreshold
+        RETURN node1.pageContent AS contextText, node1.metadata AS sourceDocument, similarity
         ORDER BY similarity DESC
         LIMIT $topN
         `,
