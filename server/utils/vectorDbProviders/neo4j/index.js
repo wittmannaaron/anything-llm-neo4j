@@ -368,8 +368,6 @@ const Neo4jDB = {
       debugLog('Executing KNN similarity search query');
       const result = await session.run(
         `
-        MATCH (q:TempQuery)
-        WHERE id(q) = $tempQueryNodeId
         CALL gds.knn.stream('chunkGraph', {
           topK: $topK,
           nodeProperties: ['embedding'],
@@ -379,7 +377,7 @@ const Neo4jDB = {
           randomSeed: 42
         })
         YIELD node1, node2, similarity
-        WHERE node1 = q AND node2:Chunk AND node2:${namespace}
+        WHERE id(node1) = $tempQueryNodeId AND node2:Chunk AND $namespace IN labels(node2)
           AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
           AND similarity >= $similarityThreshold
         RETURN node2.pageContent AS contextText, node2.metadata AS sourceDocument, similarity
