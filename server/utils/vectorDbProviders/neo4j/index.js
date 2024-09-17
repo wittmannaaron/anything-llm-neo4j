@@ -45,6 +45,7 @@ const Neo4jDB = {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
       await this.updateGraphAndRelationships();
+      log('log', 'Graph and relationships updated');
     } catch (error) {
       throw handleError(error, 'Connection failed');
     }
@@ -102,7 +103,7 @@ const Neo4jDB = {
         'Chunk',
         '*',
         {
-          nodeProperties: ['embedding']
+          nodeProperties: ['embedding', 'docId']
         }
       )
     `);
@@ -519,22 +520,24 @@ const Neo4jDB = {
           similarityMetric: 'cosine'
         })
         YIELD node1, node2, similarity
-        WITH node1, node2, similarity, node2.docId AS docId
+        WITH node1, node2, similarity, 
+             apoc.meta.type(node2.docId) AS docIdType,
+             node2.docId AS docId
         WHERE $namespace IN labels(gds.util.asNode(node2))
           AND (size($filterFilters) = 0 OR NOT toString(docId) IN [f IN $filterFilters | toString(f)])
           AND similarity >= $similarityThreshold
-        WITH node2, similarity, docId
+        WITH node2, similarity, docId, docIdType
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
         WITH node2, similarity AS directSimilarity,
              collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes,
-             docId
+             docId, docIdType
         WITH node2, directSimilarity,
              relatedNodes,
              reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore,
-             docId
+             docId, docIdType
         WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
-             directSimilarity, avgKNNScore, relatedNodes, docId
+             directSimilarity, avgKNNScore, relatedNodes, docId, docIdType
         ORDER BY combinedScore DESC
         LIMIT $topN
         RETURN node2.pageContent AS contextText,
@@ -543,7 +546,8 @@ const Neo4jDB = {
                avgKNNScore AS knnSimilarity,
                combinedScore,
                [x IN relatedNodes | x.node.pageContent] AS relatedContexts,
-               docId
+               docId,
+               docIdType
         `,
         {
           namespace,
@@ -567,14 +571,16 @@ const Neo4jDB = {
         scores.push(record.get('combinedScore'));
         relatedContexts.push(record.get('relatedContexts'));
         const docId = record.get('docId');
+        const docIdType = record.get('docIdType');
         docIds.push(docId);
-        debugLog(`docId: ${docId}, type: ${typeof docId}`);
+        debugLog(`docId: ${docId}, type from Neo4j: ${docIdType}, JavaScript type: ${typeof docId}`);
       });
 
       debugLog('Processed enhanced similarity search results', { 
         contextTextsCount: contextTexts.length, 
         scoresCount: scores.length,
-        docIds: docIds
+        docIds: docIds,
+        docIdTypes: result.records.map(record => record.get('docIdType'))
       });
 
       return {
