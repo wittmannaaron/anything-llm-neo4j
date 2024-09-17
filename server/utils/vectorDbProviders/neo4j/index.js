@@ -519,19 +519,22 @@ const Neo4jDB = {
           similarityMetric: 'cosine'
         })
         YIELD node1, node2, similarity
+        WITH node1, node2, similarity, node2.docId AS docId
         WHERE $namespace IN labels(gds.util.asNode(node2))
-          AND (size($filterFilters) = 0 OR NOT node2.docId IN $filterFilters)
+          AND (size($filterFilters) = 0 OR NOT toString(docId) IN [f IN $filterFilters | toString(f)])
           AND similarity >= $similarityThreshold
-        WITH node2, similarity
+        WITH node2, similarity, docId
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
         WITH node2, similarity AS directSimilarity,
-             collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
+             collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes,
+             docId
         WITH node2, directSimilarity,
              relatedNodes,
-             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore
+             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore,
+             docId
         WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
-             directSimilarity, avgKNNScore, relatedNodes
+             directSimilarity, avgKNNScore, relatedNodes, docId
         ORDER BY combinedScore DESC
         LIMIT $topN
         RETURN node2.pageContent AS contextText,
@@ -539,7 +542,8 @@ const Neo4jDB = {
                directSimilarity AS vectorSimilarity,
                avgKNNScore AS knnSimilarity,
                combinedScore,
-               [x IN relatedNodes | x.node.pageContent] AS relatedContexts
+               [x IN relatedNodes | x.node.pageContent] AS relatedContexts,
+               docId
         `,
         {
           namespace,
@@ -555,15 +559,23 @@ const Neo4jDB = {
       const sourceDocuments = [];
       const scores = [];
       const relatedContexts = [];
+      const docIds = [];
 
       result.records.forEach(record => {
         contextTexts.push(record.get('contextText'));
         sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
         scores.push(record.get('combinedScore'));
         relatedContexts.push(record.get('relatedContexts'));
+        const docId = record.get('docId');
+        docIds.push(docId);
+        debugLog(`docId: ${docId}, type: ${typeof docId}`);
       });
 
-      debugLog('Processed enhanced similarity search results', { contextTextsCount: contextTexts.length, scoresCount: scores.length });
+      debugLog('Processed enhanced similarity search results', { 
+        contextTextsCount: contextTexts.length, 
+        scoresCount: scores.length,
+        docIds: docIds
+      });
 
       return {
         contextTexts,
