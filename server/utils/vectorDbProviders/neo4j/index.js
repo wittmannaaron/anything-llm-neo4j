@@ -484,13 +484,15 @@ const Neo4jDB = {
     debugLog('performEnhancedSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters, knnDepth });
     debugLog('filterFilters content:', JSON.stringify(filterFilters));
     debugLog('filterFilters type:', typeof filterFilters);
-    if (Array.isArray(filterFilters)) {
-      debugLog('filterFilters is an array with length:', filterFilters.length);
-      filterFilters.forEach((filter, index) => {
-        debugLog(`filterFilters[${index}] type:`, typeof filter);
-        debugLog(`filterFilters[${index}] value:`, filter);
-      });
+    
+    // Überprüfen und ggf. anpassen von filterFilters
+    if (!Array.isArray(filterFilters)) {
+      filterFilters = [filterFilters]; // Wenn es kein Array ist, machen wir es zu einem
     }
+    filterFilters = filterFilters.map(String); // Konvertiere alle Elemente zu Strings
+    
+    debugLog('Adjusted filterFilters:', JSON.stringify(filterFilters));
+    
     const session = await this.getSession();
     try {
       const namespaceCount = await this.namespaceCount(namespace);
@@ -518,7 +520,7 @@ const Neo4jDB = {
         })
         YIELD node1, node2, similarity
         WHERE $namespace IN labels(gds.util.asNode(node2))
-          AND (size($filterFilters) = 0 OR NOT any(filter IN $filterFilters WHERE toString(node2.docId) = toString(filter)))
+          AND (size($filterFilters) = 0 OR NOT node2.docId IN $filterFilters)
           AND similarity >= $similarityThreshold
         WITH node2, similarity
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
