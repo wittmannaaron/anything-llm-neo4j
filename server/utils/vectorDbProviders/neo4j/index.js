@@ -498,7 +498,8 @@ const Neo4jDB = {
           nodeProperties: ['embedding'],
           similarityMetric: 'cosine'
         })
-        YIELD node, similarity
+        YIELD nodeId, similarity
+        MATCH (node:Chunk) WHERE id(node) = nodeId
         WHERE $namespace IN labels(node)
           AND similarity >= $similarityThreshold
         WITH node, similarity
