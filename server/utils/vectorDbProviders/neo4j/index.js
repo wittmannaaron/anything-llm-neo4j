@@ -6,6 +6,27 @@ const { storeVectorResult, cachedVectorInformation } = require("../../files");
 const { toChunks, getEmbeddingEngineSelection } = require("../../helpers");
 const { sourceIdentifier } = require("../../chats");
 
+async function projectGraph(session) {
+  const result = await session.run(`
+    CALL gds.graph.project(
+      'chunkGraph',
+      'Chunk',
+      {
+        SIMILAR_TO: {
+          type: 'SIMILAR_TO',
+          orientation: 'UNDIRECTED'
+        }
+      },
+      {
+        nodeProperties: ['embedding']
+      }
+    )
+    YIELD graphName, nodeCount, relationshipCount
+  `);
+  console.log(`Graph projected: ${result.records[0].get('graphName')}, Nodes: ${result.records[0].get('nodeCount')}, Relationships: ${result.records[0].get('relationshipCount')}`);
+  return result;
+}
+
 const debugLog = (message, data = null) => {
   if (process.env.DEBUG_NEO4J === 'true') {
     console.log(`[Neo4j Debug] ${message}`, data ? JSON.stringify(data, null, 2) : '');
@@ -62,33 +83,16 @@ const Neo4jDB = {
       const graphExists = existsResult.records[0].get('exists');
 
       if (graphExists) {
-        // Versuchen, den Graphen zu aktualisieren
-        try {
-          await session.run(`
-            CALL gds.graph.project.cypher(
-              'chunkGraph',
-              'MATCH (c:Chunk) RETURN id(c) AS id, c.embedding AS embedding',
-              'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight',
-              {
-                nodeProperties: ['embedding'],
-                relationshipProperties: ['similarity']
-              }
-            )
-          `);
-          console.log("Graph projection updated successfully.");
-        } catch (updateError) {
-          // Wenn das Update fehlschlägt, löschen wir den Graphen und erstellen ihn neu
-          console.log("Failed to update graph. Dropping and recreating...");
-          await session.run(`
-            CALL gds.graph.drop('chunkGraph')
-            YIELD graphName
-          `);
-          await this.createNewGraphProjection(session);
-        }
-      } else {
-        // Wenn der Graph nicht existiert, erstellen wir ihn neu
-        await this.createNewGraphProjection(session);
+        // Wenn der Graph existiert, löschen wir ihn
+        await session.run(`
+          CALL gds.graph.drop('chunkGraph')
+          YIELD graphName
+        `);
+        console.log("Existing graph dropped");
       }
+
+      // Graph neu erstellen mit der projektGraph-Funktion
+      await projectGraph(session);
     } catch (error) {
       console.error("Error in graph projection process:", error);
     } finally {
@@ -96,19 +100,7 @@ const Neo4jDB = {
     }
   },
 
-  createNewGraphProjection: async function(session) {
-    await session.run(`
-      CALL gds.graph.project(
-        'chunkGraph',
-        'Chunk',
-        '*',
-        {
-          nodeProperties: ['embedding']
-        }
-    )
-    `);
-    console.log("New graph projection created successfully.");
-  },
+// Diese Funktion wird entfernt, da sie durch projectGraph ersetzt wird
 
   createKNNRelationships: async function(k = 5) {
     const session = await this.getSession();
@@ -159,24 +151,8 @@ const Neo4jDB = {
         console.log("Existing graph dropped");
       }
 
-      // Graph neu erstellen
-      const result = await session.run(`
-        CALL gds.graph.project(
-          'chunkGraph',
-          'Chunk',
-          {
-            SIMILAR_TO: {
-              type: 'SIMILAR_TO',
-              orientation: 'UNDIRECTED'
-            }
-          },
-          {
-            nodeProperties: ['embedding']
-          }
-        )
-        YIELD graphName, nodeCount, relationshipCount
-      `);
-      console.log(`Graph projected: ${result.records[0].get('graphName')}, Nodes: ${result.records[0].get('nodeCount')}, Relationships: ${result.records[0].get('relationshipCount')}`);
+      // Graph neu erstellen mit der projektGraph-Funktion
+      await projectGraph(session);
 
       await this.createKNNRelationships();
     } catch (error) {
@@ -258,15 +234,8 @@ const Neo4jDB = {
         console.log("Existing graph dropped");
       }
 
-      // Schritt 1: Graphprojektion erstellen
-      await session.run(`
-        CALL gds.graph.project.cypher(
-          'chunkGraph',
-          'MATCH (c:Chunk) RETURN id(c) AS id, c.embedding AS embedding',
-          'MATCH (c1:Chunk)-[r:SIMILAR_TO]->(c2:Chunk) RETURN id(c1) AS source, id(c2) AS target, r.similarity AS weight'
-        )
-      `);
-      console.log("Graph projection created");
+      // Schritt 1: Graphprojektion erstellen mit der projektGraph-Funktion
+      await projectGraph(session);
 
       // Schritt 2: KNN-Beziehungen berechnen
       await session.run(`
