@@ -500,9 +500,9 @@ const Neo4jDB = {
         })
         YIELD nodeId, similarity
         MATCH (node:Chunk) WHERE id(node) = nodeId
+        WITH node, similarity
         WHERE $namespace IN labels(node)
           AND similarity >= $similarityThreshold
-        WITH node, similarity
         MATCH (node)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
         WITH node, similarity AS directSimilarity,
@@ -550,10 +550,10 @@ const Neo4jDB = {
       });
 
       return {
-        contextTexts,
-        sources: sourceDocuments,
-        scores,
-        relatedContexts,
+        contextTexts: contextTexts.length > 0 ? contextTexts : [],
+        sources: sourceDocuments.length > 0 ? sourceDocuments : [],
+        scores: scores.length > 0 ? scores : [],
+        relatedContexts: relatedContexts.length > 0 ? relatedContexts : [],
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
     } catch (error) {
