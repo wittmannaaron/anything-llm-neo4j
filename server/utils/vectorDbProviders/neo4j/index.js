@@ -482,6 +482,7 @@ const Neo4jDB = {
     knnDepth = 2
   }) {
     debugLog('performEnhancedSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters, knnDepth });
+    debugLog('filterFilters content:', filterFilters);
     const session = await this.getSession();
     try {
       const namespaceCount = await this.namespaceCount(namespace);
@@ -509,7 +510,7 @@ const Neo4jDB = {
         })
         YIELD node1, node2, similarity
         WHERE $namespace IN labels(gds.util.asNode(node2))
-          AND ALL(filter IN $filterFilters WHERE NOT toString(node2.docId) IN filter)
+          AND (size($filterFilters) = 0 OR NOT any(filter IN $filterFilters WHERE toString(node2.docId) = filter))
           AND similarity >= $similarityThreshold
         WITH node2, similarity
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
