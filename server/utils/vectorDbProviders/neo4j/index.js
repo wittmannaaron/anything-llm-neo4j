@@ -533,8 +533,7 @@ const Neo4jDB = {
           similarityCutoff: $similarityThreshold
         })
         YIELD node1, node2, similarity
-        MATCH (n2:Chunk) WHERE id(n2) = node2
-        WHERE $namespace IN labels(n2)
+        MATCH (n2:Chunk) WHERE id(n2) = node2 AND $namespace IN labels(n2)
         OPTIONAL MATCH (n2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
         WITH n2, similarity AS directSimilarity,
@@ -583,13 +582,16 @@ const Neo4jDB = {
         scoresCount: scores.length
       });
 
-      return {
+      const vectorSearchResults = {
         contextTexts: contextTexts.length > 0 ? contextTexts : [],
         sources: sourceDocuments.length > 0 ? sourceDocuments : [],
         scores: scores.length > 0 ? scores : [],
         relatedContexts: relatedContexts.length > 0 ? relatedContexts : [],
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
+      
+      debugLog('Vector search results', vectorSearchResults);
+      return vectorSearchResults;
     } catch (error) {
       debugLog('Error in performEnhancedSimilaritySearch', error);
       return handleError(error, 'Enhanced similarity search failed');
