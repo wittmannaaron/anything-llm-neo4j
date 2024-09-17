@@ -139,9 +139,35 @@ const Neo4jDB = {
   },
 
   updateGraphAndRelationships: async function() {
-    await this.createOrUpdateVectorIndex();
-    await this.createGraphProjection();
-    await this.createKNNRelationships();
+    const session = await this.getSession();
+    try {
+      await this.createOrUpdateVectorIndex();
+      
+      // Aktualisieren oder Erstellen der Graph-Projektion
+      const result = await session.run(`
+        CALL gds.graph.project(
+          'chunkGraph',
+          'Chunk',
+          {
+            SIMILAR_TO: {
+              type: 'SIMILAR_TO',
+              orientation: 'UNDIRECTED'
+            }
+          },
+          {
+            nodeProperties: ['embedding']
+          }
+        )
+        YIELD graphName, nodeCount, relationshipCount
+      `);
+      console.log(`Graph projected: ${result.records[0].get('graphName')}, Nodes: ${result.records[0].get('nodeCount')}, Relationships: ${result.records[0].get('relationshipCount')}`);
+
+      await this.createKNNRelationships();
+    } catch (error) {
+      console.error("Error updating graph and relationships:", error);
+    } finally {
+      await session.close();
+    }
   },
 
   getEmbeddingDimensions: async function() {
@@ -490,20 +516,6 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
 
-      /*
-      // Ensure the graph is projected
-      await session.run(`
-        CALL gds.graph.project(
-          'chunkGraph',
-          'Chunk',
-          'SIMILAR_TO',
-          {
-            nodeProperties: ['embedding'],
-            relationshipProperties: ['similarity']
-          }
-        )
-      `);
-       */
       debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
