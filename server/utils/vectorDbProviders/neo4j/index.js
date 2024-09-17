@@ -482,7 +482,15 @@ const Neo4jDB = {
     knnDepth = 2
   }) {
     debugLog('performEnhancedSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters, knnDepth });
-    debugLog('filterFilters content:', filterFilters);
+    debugLog('filterFilters content:', JSON.stringify(filterFilters));
+    debugLog('filterFilters type:', typeof filterFilters);
+    if (Array.isArray(filterFilters)) {
+      debugLog('filterFilters is an array with length:', filterFilters.length);
+      filterFilters.forEach((filter, index) => {
+        debugLog(`filterFilters[${index}] type:`, typeof filter);
+        debugLog(`filterFilters[${index}] value:`, filter);
+      });
+    }
     const session = await this.getSession();
     try {
       const namespaceCount = await this.namespaceCount(namespace);
@@ -510,7 +518,7 @@ const Neo4jDB = {
         })
         YIELD node1, node2, similarity
         WHERE $namespace IN labels(gds.util.asNode(node2))
-          AND (size($filterFilters) = 0 OR NOT any(filter IN $filterFilters WHERE toString(node2.docId) = filter))
+          AND (size($filterFilters) = 0 OR NOT any(filter IN $filterFilters WHERE toString(node2.docId) = toString(filter)))
           AND similarity >= $similarityThreshold
         WITH node2, similarity
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
@@ -564,6 +572,7 @@ const Neo4jDB = {
       };
     } catch (error) {
       debugLog('Error in performEnhancedSimilaritySearch', error);
+      debugLog('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
       return handleError(error, 'Enhanced similarity search failed');
     } finally {
       await session.close();
