@@ -29,7 +29,13 @@ async function projectGraph(session) {
 
 const debugLog = (message, data = null) => {
   if (process.env.DEBUG_NEO4J === 'true') {
-    console.log(`[Neo4j Debug] ${message}`, data ? JSON.stringify(data, null, 2) : '');
+    const cleanData = data ? JSON.parse(JSON.stringify(data, (key, value) => {
+      if (typeof value === 'string') {
+        return value.replace(/^[\s\S]*?<\/document_metadata>\s*/, '').trim();
+      }
+      return value;
+    })) : null;
+    console.log(`[Neo4j Debug] ${message}`, cleanData ? JSON.stringify(cleanData, null, 2) : '');
   }
 };
 
@@ -596,40 +602,14 @@ const Neo4jDB = {
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
       
-      // Funktion zum Entfernen der Metadaten aus dem Debug-Output
-      const removeMetadata = (obj) => {
-        if (Array.isArray(obj)) {
-          return obj.map(removeMetadata);
-        } else if (typeof obj === 'object' && obj !== null) {
-          const newObj = {};
-          for (const [key, value] of Object.entries(obj)) {
-            if (key === 'sources' || key === 'contextTexts' || key === 'relatedContexts') {
-              newObj[key] = Array.isArray(value) ? value.map(item => {
-                if (typeof item === 'string') {
-                  // Entfernt vollständig den <document_metadata> Abschnitt und alles davor
-                  const cleanedItem = item.replace(/^[\s\S]*?<\/document_metadata>\s*/, '');
-                  return cleanedItem.trim();
-                } else if (typeof item === 'object') {
-                  const cleanedItem = { ...item };
-                  if (cleanedItem.metadata) {
-                    delete cleanedItem.metadata;
-                  }
-                  return cleanedItem;
-                }
-                return item;
-              }) : value;
-            } else {
-              newObj[key] = removeMetadata(value);
-            }
-          }
-          return newObj;
-        }
-        return obj;
-      };
-
-      // Entfernen der Metadaten für den Debug-Output
-      const cleanedVectorSearchResults = removeMetadata(vectorSearchResults);
-      debugLog('Vector search results', cleanedVectorSearchResults);
+      // Logging nur der Längen und nicht der tatsächlichen Inhalte
+      debugLog('Vector search results summary', {
+        contextTextsCount: vectorSearchResults.contextTexts.length,
+        sourcesCount: vectorSearchResults.sources.length,
+        scoresCount: vectorSearchResults.scores.length,
+        relatedContextsCount: vectorSearchResults.relatedContexts.length,
+        message: vectorSearchResults.message
+      });
       return vectorSearchResults;
     } catch (error) {
       debugLog('Error in performEnhancedSimilaritySearch', error);
