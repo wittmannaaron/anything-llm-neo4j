@@ -143,7 +143,23 @@ const Neo4jDB = {
     try {
       await this.createOrUpdateVectorIndex();
       
-      // Aktualisieren oder Erstellen der Graph-Projektion
+      // Überprüfen, ob der Graph bereits existiert
+      const existsResult = await session.run(`
+        CALL gds.graph.exists('chunkGraph')
+        YIELD exists
+      `);
+      const graphExists = existsResult.records[0].get('exists');
+
+      if (graphExists) {
+        // Graph löschen, wenn er bereits existiert
+        await session.run(`
+          CALL gds.graph.drop('chunkGraph')
+          YIELD graphName
+        `);
+        console.log("Existing graph dropped");
+      }
+
+      // Graph neu erstellen
       const result = await session.run(`
         CALL gds.graph.project(
           'chunkGraph',
