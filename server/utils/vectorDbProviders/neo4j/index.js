@@ -507,7 +507,7 @@ const Neo4jDB = {
     namespace,
     input,
     LLMConnector,
-    similarityThreshold = 0.25,
+    similarityThreshold = 0.8,
     topN = 4,
     filterFilters = [],
     knnDepth = 2
@@ -603,21 +603,19 @@ const Neo4jDB = {
         } else if (typeof obj === 'object' && obj !== null) {
           const newObj = {};
           for (const [key, value] of Object.entries(obj)) {
-            if (key === 'sources') {
-              newObj[key] = value.map(source => {
-                if (typeof source === 'string') {
-                  return source.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, '');
-                } else if (typeof source === 'object') {
-                  const cleanedSource = { ...source };
-                  if (cleanedSource.metadata) {
-                    delete cleanedSource.metadata;
+            if (key === 'sources' || key === 'contextTexts' || key === 'relatedContexts') {
+              newObj[key] = Array.isArray(value) ? value.map(item => {
+                if (typeof item === 'string') {
+                  return item.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, '');
+                } else if (typeof item === 'object') {
+                  const cleanedItem = { ...item };
+                  if (cleanedItem.metadata) {
+                    delete cleanedItem.metadata;
                   }
-                  return cleanedSource;
+                  return cleanedItem;
                 }
-                return source;
-              });
-            } else if (key === 'contextTexts') {
-              newObj[key] = value.map(text => text.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, ''));
+                return item;
+              }) : value;
             } else {
               newObj[key] = removeMetadata(value);
             }
