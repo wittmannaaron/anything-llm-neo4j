@@ -523,32 +523,28 @@ const Neo4jDB = {
       debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
-        MATCH (query:Chunk)
-        WHERE id(query) = 0
-        CALL gds.nodeSimilarity.stream('chunkGraph', {
-          sourceNodeFilter: id(query),
-          targetNodeFilter: $namespace,
-          nodeProperties: ['embedding'],
-          topK: $topN,
-          similarityCutoff: $similarityThreshold
-        })
-        YIELD node1, node2, similarity
-        MATCH (n2:Chunk) WHERE id(n2) = node2 AND $namespace IN labels(n2)
-        OPTIONAL MATCH (n2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
+        MATCH (n:Chunk)
+        WHERE $namespace IN labels(n)
+        WITH n, gds.similarity.cosine(n.embedding, $queryVector) AS similarity
+        WHERE similarity >= $similarityThreshold
+        WITH n, similarity
+        ORDER BY similarity DESC
+        LIMIT $topN
+        OPTIONAL MATCH (n)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode:Chunk)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
-        WITH n2, similarity AS directSimilarity,
+        WITH n, similarity AS directSimilarity,
              collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
-        WITH n2, directSimilarity,
+        WITH n, directSimilarity,
              relatedNodes,
              CASE WHEN size(relatedNodes) > 0
                   THEN reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes)
                   ELSE 0 END AS avgKNNScore
-        WITH n2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
+        WITH n, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
              directSimilarity, avgKNNScore, relatedNodes
         ORDER BY combinedScore DESC
         LIMIT $topN
-        RETURN n2.pageContent AS contextText,
-               n2.metadata AS sourceDocument,
+        RETURN n.pageContent AS contextText,
+               n.metadata AS sourceDocument,
                directSimilarity AS vectorSimilarity,
                avgKNNScore AS knnSimilarity,
                combinedScore,
@@ -568,10 +564,11 @@ const Neo4jDB = {
       const relatedContexts = [];
 
       result.records.forEach(record => {
-        const docId = JSON.parse(record.get('sourceDocument')).docId;
+        const sourceDocument = record.get('sourceDocument');
+        const docId = typeof sourceDocument === 'string' ? JSON.parse(sourceDocument).docId : sourceDocument.docId;
         if (filterFilters.length === 0 || !filterFilters.includes(docId)) {
           contextTexts.push(record.get('contextText'));
-          sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
+          sourceDocuments.push(sourceDocument);
           scores.push(record.get('combinedScore'));
           relatedContexts.push(record.get('relatedContexts'));
         }
