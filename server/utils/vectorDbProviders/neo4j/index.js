@@ -490,6 +490,7 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
 
+      /*
       // Ensure the graph is projected
       await session.run(`
         CALL gds.graph.project(
@@ -502,13 +503,13 @@ const Neo4jDB = {
           }
         )
       `);
-
+       */
       debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
         MATCH (query:Chunk)
         WHERE id(query) = 0
-        CALL gds.similarity.cosine.stream('chunkGraph', {
+        CALL gds.nodeSimilarity.stream('chunkGraph', {
           sourceNodeFilter: id(query),
           targetNodeFilter: $namespace,
           nodeProperties: ['embedding'],
