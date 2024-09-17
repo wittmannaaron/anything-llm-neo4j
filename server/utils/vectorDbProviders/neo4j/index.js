@@ -606,8 +606,9 @@ const Neo4jDB = {
             if (key === 'sources' || key === 'contextTexts' || key === 'relatedContexts') {
               newObj[key] = Array.isArray(value) ? value.map(item => {
                 if (typeof item === 'string') {
-                  // Entfernt vollständig den <document_metadata> Abschnitt und alle Leerzeilen danach
-                  return item.replace(/<document_metadata>[\s\S]*?<\/document_metadata>(\s*\n)*/, '').trim();
+                  // Entfernt vollständig den <document_metadata> Abschnitt und alles davor
+                  const cleanedItem = item.replace(/^[\s\S]*?<\/document_metadata>\s*/, '');
+                  return cleanedItem.trim();
                 } else if (typeof item === 'object') {
                   const cleanedItem = { ...item };
                   if (cleanedItem.metadata) {
