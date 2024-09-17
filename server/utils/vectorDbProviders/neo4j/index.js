@@ -508,8 +508,8 @@ const Neo4jDB = {
           similarityMetric: 'cosine'
         })
         YIELD node1, node2, similarity
-        WHERE $namespace IN labels(node2)
-          AND ALL(filter IN $filterFilters WHERE NOT node2.docId IN filter)
+        WHERE $namespace IN labels(gds.util.asNode(node2))
+          AND ALL(filter IN $filterFilters WHERE NOT toString(node2.docId) IN filter)
           AND similarity >= $similarityThreshold
         WITH node2, similarity
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
