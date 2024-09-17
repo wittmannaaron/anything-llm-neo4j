@@ -498,21 +498,27 @@ const Neo4jDB = {
           nodeProperties: ['embedding'],
           similarityMetric: 'cosine'
         })
-        YIELD node1, node2, similarity
-        WHERE $namespace IN labels(gds.util.asNode(node2))
+        YIELD node, similarity
+        WHERE $namespace IN labels(node)
           AND similarity >= $similarityThreshold
-        WITH node2, similarity
-        MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
+        WITH node, similarity
+        MATCH (node)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
-        WITH node2, similarity AS directSimilarity,
+        WITH node, similarity AS directSimilarity,
              collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
-        WITH node2, directSimilarity,
+        WITH node, directSimilarity,
              relatedNodes,
              reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore
-        WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
+        WITH node, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
              directSimilarity, avgKNNScore, relatedNodes
         ORDER BY combinedScore DESC
-        RETURN node2, directSimilarity, avgKNNScore, relatedNodes, combinedScore
+        LIMIT $topN
+        RETURN node.pageContent AS contextText,
+               node.metadata AS sourceDocument,
+               directSimilarity AS vectorSimilarity,
+               avgKNNScore AS knnSimilarity,
+               combinedScore,
+               [x IN relatedNodes | x.node.pageContent] AS relatedContexts
         `,
         {
           namespace,
@@ -522,23 +528,19 @@ const Neo4jDB = {
         }
       );
 
-      const filteredResults = result.records.filter(record => {
-        const node = record.get('node2');
-        const docId = node.properties.docId;
-        return filterFilters.length === 0 || !filterFilters.includes(docId);
-      }).slice(0, topN);
-
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
       const relatedContexts = [];
 
-      filteredResults.forEach(record => {
-        const node = record.get('node2');
-        contextTexts.push(node.properties.pageContent);
-        sourceDocuments.push(JSON.parse(node.properties.metadata));
-        scores.push(record.get('combinedScore'));
-        relatedContexts.push(record.get('relatedNodes').map(r => r.node.properties.pageContent));
+      result.records.forEach(record => {
+        const docId = JSON.parse(record.get('sourceDocument')).docId;
+        if (filterFilters.length === 0 || !filterFilters.includes(docId)) {
+          contextTexts.push(record.get('contextText'));
+          sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
+          scores.push(record.get('combinedScore'));
+          relatedContexts.push(record.get('relatedContexts'));
+        }
       });
 
       debugLog('Processed enhanced similarity search results', { 
