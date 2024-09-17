@@ -607,9 +607,17 @@ const Neo4jDB = {
               newObj[key] = value.map(source => {
                 if (typeof source === 'string') {
                   return source.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, '');
+                } else if (typeof source === 'object') {
+                  const cleanedSource = { ...source };
+                  if (cleanedSource.metadata) {
+                    delete cleanedSource.metadata;
+                  }
+                  return cleanedSource;
                 }
                 return source;
               });
+            } else if (key === 'contextTexts') {
+              newObj[key] = value.map(text => text.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, ''));
             } else {
               newObj[key] = removeMetadata(value);
             }
