@@ -596,7 +596,32 @@ const Neo4jDB = {
         message: contextTexts.length === 0 ? `No results found for namespace ${namespace} above similarity threshold ${similarityThreshold}` : null,
       };
       
-      debugLog('Vector search results', vectorSearchResults);
+      // Funktion zum Entfernen der Metadaten aus dem Debug-Output
+      const removeMetadata = (obj) => {
+        if (Array.isArray(obj)) {
+          return obj.map(removeMetadata);
+        } else if (typeof obj === 'object' && obj !== null) {
+          const newObj = {};
+          for (const [key, value] of Object.entries(obj)) {
+            if (key === 'sources') {
+              newObj[key] = value.map(source => {
+                if (typeof source === 'string') {
+                  return source.replace(/<document_metadata>[\s\S]*?<\/document_metadata>\s*/, '');
+                }
+                return source;
+              });
+            } else {
+              newObj[key] = removeMetadata(value);
+            }
+          }
+          return newObj;
+        }
+        return obj;
+      };
+
+      // Entfernen der Metadaten für den Debug-Output
+      const cleanedVectorSearchResults = removeMetadata(vectorSearchResults);
+      debugLog('Vector search results', cleanedVectorSearchResults);
       return vectorSearchResults;
     } catch (error) {
       debugLog('Error in performEnhancedSimilaritySearch', error);
