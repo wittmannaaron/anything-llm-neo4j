@@ -65,6 +65,25 @@ const Neo4jDB = {
     try {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
+
+      const session = await this.getSession();
+      try {
+        const existsResult = await session.run(`
+          CALL gds.graph.exists('chunkGraph')
+          YIELD exists
+        `);
+        const graphExists = existsResult.records[0].get('exists');
+
+        if (!graphExists) {
+          log('log', 'chunkGraph does not exist, creating it');
+          await projectGraph(session);
+        } else {
+          log('log', 'chunkGraph already exists');
+        }
+      } finally {
+        await session.close();
+      }
+
       await this.updateGraphAndRelationships();
       log('log', 'Graph and relationships updated');
     } catch (error) {
