@@ -576,7 +576,16 @@ const Neo4jDB = {
 
       debugLog('Processed enhanced similarity search results', { 
         contextTextsCount: contextTexts.length, 
-        scoresCount: scores.length
+        scoresCount: scores.length,
+        sampleContextText: contextTexts.length > 0 ? contextTexts[0].substring(0, 100) + '...' : 'No context',
+        sampleSource: sourceDocuments.length > 0 ? JSON.stringify(sourceDocuments[0]).substring(0, 100) + '...' : 'No source'
+      });
+
+      debugLog('Returning similarity search results', {
+        contextTextsCount: contextTexts.length,
+        sourcesCount: sourceDocuments.length,
+        scoresCount: scores.length,
+        firstScore: scores.length > 0 ? scores[0] : null
       });
 
       const vectorSearchResults = {
