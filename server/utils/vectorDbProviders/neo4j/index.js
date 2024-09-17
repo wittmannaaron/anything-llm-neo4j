@@ -533,23 +533,23 @@ const Neo4jDB = {
           similarityCutoff: $similarityThreshold
         })
         YIELD node1, node2, similarity
-        WITH node2, similarity
-        WHERE $namespace IN labels(node2)
-        OPTIONAL MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
+        MATCH (n2:Chunk) WHERE id(n2) = node2
+        WHERE $namespace IN labels(n2)
+        OPTIONAL MATCH (n2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
-        WITH node2, similarity AS directSimilarity,
+        WITH n2, similarity AS directSimilarity,
              collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
-        WITH node2, directSimilarity,
+        WITH n2, directSimilarity,
              relatedNodes,
              CASE WHEN size(relatedNodes) > 0
                   THEN reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes)
                   ELSE 0 END AS avgKNNScore
-        WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
+        WITH n2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
              directSimilarity, avgKNNScore, relatedNodes
         ORDER BY combinedScore DESC
         LIMIT $topN
-        RETURN node2.pageContent AS contextText,
-               node2.metadata AS sourceDocument,
+        RETURN n2.pageContent AS contextText,
+               n2.metadata AS sourceDocument,
                directSimilarity AS vectorSimilarity,
                avgKNNScore AS knnSimilarity,
                combinedScore,
