@@ -490,32 +490,49 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
 
+      // Ensure the graph is projected
+      await session.run(`
+        CALL gds.graph.project(
+          'chunkGraph',
+          'Chunk',
+          'SIMILAR_TO',
+          {
+            nodeProperties: ['embedding'],
+            relationshipProperties: ['similarity']
+          }
+        )
+      `);
+
       debugLog('Executing enhanced similarity search query');
       const result = await session.run(
         `
-        CALL gds.knn.stream('chunkGraph', {
-          topK: $topN,
+        MATCH (query:Chunk)
+        WHERE id(query) = 0
+        CALL gds.similarity.cosine.stream('chunkGraph', {
+          sourceNodeFilter: id(query),
+          targetNodeFilter: $namespace,
           nodeProperties: ['embedding'],
-          similarityMetric: 'cosine'
+          topK: $topN,
+          similarityCutoff: $similarityThreshold
         })
-        YIELD nodeId, similarity
-        MATCH (node:Chunk) WHERE id(node) = nodeId
-        WITH node, similarity
-        WHERE $namespace IN labels(node)
-          AND similarity >= $similarityThreshold
-        MATCH (node)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
+        YIELD node1, node2, similarity
+        WITH node2, similarity
+        WHERE $namespace IN labels(node2)
+        OPTIONAL MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
-        WITH node, similarity AS directSimilarity,
+        WITH node2, similarity AS directSimilarity,
              collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
-        WITH node, directSimilarity,
+        WITH node2, directSimilarity,
              relatedNodes,
-             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore
-        WITH node, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
+             CASE WHEN size(relatedNodes) > 0
+                  THEN reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes)
+                  ELSE 0 END AS avgKNNScore
+        WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
              directSimilarity, avgKNNScore, relatedNodes
         ORDER BY combinedScore DESC
         LIMIT $topN
-        RETURN node.pageContent AS contextText,
-               node.metadata AS sourceDocument,
+        RETURN node2.pageContent AS contextText,
+               node2.metadata AS sourceDocument,
                directSimilarity AS vectorSimilarity,
                avgKNNScore AS knnSimilarity,
                combinedScore,
@@ -523,7 +540,7 @@ const Neo4jDB = {
         `,
         {
           namespace,
-          topN: neo4j.int(topN * 3),
+          topN: neo4j.int(topN),
           queryVector,
           similarityThreshold
         }
