@@ -45,6 +45,7 @@ const Neo4jDB = {
       await this.driver.verifyConnectivity();
       log('log', 'Connection established');
       await this.updateGraphAndRelationships();
+      log('log', 'Graph and relationships updated');
     } catch (error) {
       throw handleError(error, 'Connection failed');
     }
@@ -104,7 +105,7 @@ const Neo4jDB = {
         {
           nodeProperties: ['embedding']
         }
-      )
+    )
     `);
     console.log("New graph projection created successfully.");
   },
@@ -482,30 +483,9 @@ const Neo4jDB = {
     knnDepth = 2
   }) {
     debugLog('performEnhancedSimilaritySearch called', { namespace, input, similarityThreshold, topN, filterFilters, knnDepth });
-    debugLog('filterFilters content:', JSON.stringify(filterFilters));
-    debugLog('filterFilters type:', typeof filterFilters);
-    
-    // Überprüfen und ggf. anpassen von filterFilters
-    if (!Array.isArray(filterFilters)) {
-      filterFilters = [filterFilters]; // Wenn es kein Array ist, machen wir es zu einem
-    }
-    filterFilters = filterFilters.map(String); // Konvertiere alle Elemente zu Strings
-    
-    debugLog('Adjusted filterFilters:', JSON.stringify(filterFilters));
     
     const session = await this.getSession();
     try {
-      const namespaceCount = await this.namespaceCount(namespace);
-      if (namespaceCount === 0) {
-        debugLog('No chunks found in namespace', { namespace });
-        return {
-          contextTexts: [],
-          sources: [],
-          scores: [],
-          message: `No chunks found in namespace ${namespace}`,
-        };
-      }
-
       debugLog('Embedding input text');
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog('Input text embedded successfully');
@@ -519,62 +499,51 @@ const Neo4jDB = {
           similarityMetric: 'cosine'
         })
         YIELD node1, node2, similarity
-        WITH node1, node2, similarity, node2.docId AS docId
         WHERE $namespace IN labels(gds.util.asNode(node2))
-          AND (size($filterFilters) = 0 OR NOT toString(docId) IN [f IN $filterFilters | toString(f)])
           AND similarity >= $similarityThreshold
-        WITH node2, similarity, docId
+        WITH node2, similarity
         MATCH (node2)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
         WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
         WITH node2, similarity AS directSimilarity,
-             collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes,
-             docId
+             collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
         WITH node2, directSimilarity,
              relatedNodes,
-             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore,
-             docId
+             reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes) AS avgKNNScore
         WITH node2, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore,
-             directSimilarity, avgKNNScore, relatedNodes, docId
+             directSimilarity, avgKNNScore, relatedNodes
         ORDER BY combinedScore DESC
-        LIMIT $topN
-        RETURN node2.pageContent AS contextText,
-               node2.metadata AS sourceDocument,
-               directSimilarity AS vectorSimilarity,
-               avgKNNScore AS knnSimilarity,
-               combinedScore,
-               [x IN relatedNodes | x.node.pageContent] AS relatedContexts,
-               docId
+        RETURN node2, directSimilarity, avgKNNScore, relatedNodes, combinedScore
         `,
         {
           namespace,
-          filterFilters,
           topN: neo4j.int(topN * 3),
           queryVector,
           similarityThreshold
         }
       );
-      debugLog('Enhanced similarity search query executed', { recordCount: result.records.length });
+
+      const filteredResults = result.records.filter(record => {
+        const node = record.get('node2');
+        const docId = node.properties.docId;
+        return filterFilters.length === 0 || !filterFilters.includes(docId);
+      }).slice(0, topN);
 
       const contextTexts = [];
       const sourceDocuments = [];
       const scores = [];
       const relatedContexts = [];
-      const docIds = [];
 
-      result.records.forEach(record => {
-        contextTexts.push(record.get('contextText'));
-        sourceDocuments.push(JSON.parse(record.get('sourceDocument')));
+      filteredResults.forEach(record => {
+        const node = record.get('node2');
+        contextTexts.push(node.properties.pageContent);
+        sourceDocuments.push(JSON.parse(node.properties.metadata));
         scores.push(record.get('combinedScore'));
-        relatedContexts.push(record.get('relatedContexts'));
-        const docId = record.get('docId');
-        docIds.push(docId);
-        debugLog(`docId: ${docId}, type: ${typeof docId}`);
+        relatedContexts.push(record.get('relatedNodes').map(r => r.node.properties.pageContent));
       });
 
       debugLog('Processed enhanced similarity search results', { 
         contextTextsCount: contextTexts.length, 
-        scoresCount: scores.length,
-        docIds: docIds
+        scoresCount: scores.length
       });
 
       return {
@@ -586,7 +555,6 @@ const Neo4jDB = {
       };
     } catch (error) {
       debugLog('Error in performEnhancedSimilaritySearch', error);
-      debugLog('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
       return handleError(error, 'Enhanced similarity search failed');
     } finally {
       await session.close();
