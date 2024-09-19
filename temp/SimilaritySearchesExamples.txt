@@ -1,0 +1,78 @@
+Neo4j bietet mehrere Möglichkeiten, um Ähnlichkeitssuchen mit der Graph Data Science (GDS) Bibliothek durchzuführen:
+Node Similarity Algorithmus
+Der Node Similarity Algorithmus vergleicht Knoten basierend auf ihren Verbindungen:
+
+    Erstellen Sie einen projizierten Graph:
+
+
+CALL gds.graph.create('myGraph', ['Node'], 'RELATIONSHIP')
+
+    Führen Sie den Node Similarity Algorithmus aus:
+
+
+CALL gds.nodeSimilarity.stream('myGraph')
+YIELD node1, node2, similarity
+RETURN gds.util.asNode(node1).name AS Node1, 
+       gds.util.asNode(node2).name AS Node2,
+       similarity
+ORDER BY similarity DESCENDING
+
+Dieser Algorithmus berechnet die Ähnlichkeit zwischen Knotenpaaren basierend auf gemeinsamen Nachbarn.
+Ähnlichkeitsfunktionen
+Neo4j GDS bietet auch verschiedene Ähnlichkeitsfunktionen für numerische Vektoren:
+
+    Jaccard-Ähnlichkeit
+    Cosinus-Ähnlichkeit
+    Pearson-Korrelation
+    Euklidische Ähnlichkeit
+
+Beispiel für Cosinus-Ähnlichkeit:
+
+
+RETURN gds.similarity.cosine(
+  [1.0, 5.0, 3.0, 6.7],
+  [5.0, 2.5, 3.1, 9.0]
+) AS cosineSimilarity
+
+Diese Funktionen können verwendet werden, um die Ähnlichkeit zwischen Eigenschaftsvektoren von Knoten zu berechnen.
+Vektorindizes für semantische Suche
+Für semantische Ähnlichkeitssuchen können Sie Vektorindizes in Neo4j verwenden:
+
+    Erstellen Sie einen Vektorindex:
+
+
+CALL db.index.vector.createNodeIndex(
+  'myVectorIndex',
+  'Node',
+  'embedding',
+  1536,
+  'cosine'
+)
+
+    Führen Sie eine Ähnlichkeitssuche durch:
+
+
+CALL db.index.vector.queryNodes('myVectorIndex', 5, $queryVector)
+YIELD node, score
+RETURN node.name, score
+
+Dies ermöglicht effiziente Ähnlichkeitssuchen auf großen Datensätzen.
+Optimierung
+Für große Graphen können Sie die Leistung verbessern durch:
+
+    Verwendung von Degree-Cutoffs
+    Filtern von Quell- und Zielknoten
+    Aufteilen des Graphen in Komponenten
+    Parallele Verarbeitung mit erhöhter Concurrency
+
+Beispiel:
+
+
+CALL gds.nodeSimilarity.stream('myGraph', {
+  degreeCutoff: 10,
+  concurrency: 4,
+  sourceNodeFilter: 'LabelA',
+  targetNodeFilter: 'LabelB'
+})
+
+Diese Techniken können die Laufzeit für große Graphen erheblich reduzieren. Durch die Kombination dieser Methoden können Sie effiziente Ähnlichkeitssuchen in Neo4j implementieren, die auf Ihre spezifischen Anforderungen zugeschnitten sind.

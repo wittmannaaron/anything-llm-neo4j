@@ -557,7 +557,7 @@ const Neo4jDB = {
     similarityThreshold = 0.1,
     topN = 50,
     filterFilters = [],
-    knnDepth = 4,
+    knnDepth = 4
   }) {
     console.log("[Neo4j Debug] performSimilaritySearch called with:", {
       namespace,
@@ -591,57 +591,47 @@ const Neo4jDB = {
       const queryVector = await LLMConnector.embedTextInput(input);
       debugLog("Input text embedded successfully");
 
-      // Ab hier -->
+// Ab hier -->
 
-      debugLog("Executing similarity search query using GDS projection");
+      debugLog("Executing similarity search query");
       const result = await session.run(
-        `
-  CALL gds.knn.stream('chunkGraph', {
-    topK: $topN,
-    nodeProperties: ['embedding'],
-    randomSeed: 42,
-    concurrency: 1,
-    sampleRate: 1.0,
-    deltaThreshold: 0.0
-  })
-  YIELD node1, node2, similarity
-  WHERE gds.util.asNode(node1).namespace = $namespace
-    AND similarity >= $similarityThreshold
-  WITH gds.util.asNode(node1) AS sourceNode, gds.util.asNode(node2) AS relatedNode, similarity AS directSimilarity
-  OPTIONAL MATCH path = (sourceNode)-[:SIMILAR_TO*1..${knnDepth}]-(relatedNode)
-  WHERE ALL(rel IN relationships(path) WHERE rel.similarity >= $similarityThreshold)
-  WITH sourceNode, relatedNode, directSimilarity,
-    CASE 
-      WHEN path IS NOT NULL 
-      THEN reduce(s = 1.0, rel IN relationships(path) | s * rel.similarity) 
-      ELSE 0 
-    END AS pathSimilarity
-  WITH sourceNode, 
-    collect({node: relatedNode, similarity: coalesce(pathSimilarity, directSimilarity)}) AS relatedNodes,
-    directSimilarity
-  WITH sourceNode, 
-    directSimilarity,
-    CASE 
-      WHEN size(relatedNodes) > 0
-      THEN reduce(s = 0, x IN relatedNodes | s + x.similarity) / size(relatedNodes)
-      ELSE 0 
-    END AS avgKNNScore
-  WITH sourceNode, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore
-  ORDER BY combinedScore DESC
-  LIMIT $topN
-  RETURN sourceNode.pageContent AS contextText,
-    sourceNode.metadata AS sourceDocument,
-    combinedScore AS similarity
-  `,
-        {
-          namespace,
-          queryVector,
-          topN: neo4j.int(topN),
-          similarityThreshold,
-        }
-      );
-      const endTime = process.hrtime(startTime);
-      const executionTime = (endTime[0] * 1000 + endTime[1] / 1e6).toFixed(2);
+      /*  `MATCH (c:Chunk:${namespace})
+       WHERE ALL(filter IN $filterFilters WHERE NOT c.docId IN filter)
+       WITH c,
+       gds.similarity.cosine(c.embedding, $queryVector) AS similarity
+       WHERE similarity >= $similarityThreshold
+       RETURN c.pageContent AS contextText, c.metadata AS sourceDocument, similarity
+       ORDER BY similarity DESC
+       LIMIT $topN`, */
+      `MATCH (n:Chunk)
+      WHERE $namespace IN labels(n)
+      WITH n, gds.similarity.cosine(n.embedding, $queryVector) AS directSimilarity
+      WHERE directSimilarity >= $similarityThreshold
+      WITH n, directSimilarity
+      OPTIONAL MATCH (n)-[r:SIMILAR_TO*1..${knnDepth}]-(relatedNode:Chunk)
+      WHERE ALL(rel IN r WHERE rel.similarity >= $similarityThreshold)
+      WITH n, directSimilarity,
+        collect({node: relatedNode, pathSimilarity: reduce(s = 1.0, rel IN r | s * rel.similarity)}) AS relatedNodes
+      WITH n, directSimilarity,
+        CASE WHEN size(relatedNodes) > 0
+          THEN reduce(s = 0, x IN relatedNodes | s + x.pathSimilarity) / size(relatedNodes)
+          ELSE 0 END AS avgKNNScore
+      WITH n, directSimilarity * 0.7 + avgKNNScore * 0.3 AS combinedScore
+      ORDER BY combinedScore DESC
+      LIMIT $topN
+      RETURN n.pageContent AS contextText,
+        n.metadata AS sourceDocument,
+        combinedScore AS similarity`,
+      {
+        namespace,
+        queryVector,
+        filterFilters,
+        topN: neo4j.int(topN),
+        similarityThreshold,
+      }
+    );
+    const endTime = process.hrtime(startTime);
+    const executionTime = (endTime[0] * 1000 + endTime[1] / 1e6).toFixed(2);
       debugLog("Similarity search query executed", {
         recordCount: result.records.length,
         executionTime: `${executionTime} ms`,

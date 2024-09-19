@@ -1,0 +1,86 @@
+Hier sind einige Beispiele für Similarity Search mit der Graph Data Science (GDS) Bibliothek in Neo4j:
+
+## Node Similarity
+
+Der Node Similarity Algorithmus vergleicht Knoten basierend auf ihren Nachbarn und berechnet Ähnlichkeiten mit dem Jaccard-Koeffizienten:
+
+```cypher
+CALL gds.graph.create('myGraph', ['Person', 'Cuisine'], {
+  LIKES: {
+    type: 'LIKES',
+    properties: { score: { property: 'score', defaultValue: 1.0 } }
+  }
+});
+
+CALL gds.nodeSimilarity.stream('myGraph')
+YIELD node1, node2, similarity
+WITH gds.util.asNode(node1).name AS from,
+     gds.util.asNode(node2).name AS to,
+     similarity
+WHERE from = 'John'  
+RETURN from, to, similarity;
+```
+
+Dies berechnet die Ähnlichkeit zwischen John und allen anderen Personen basierend auf ihren gemeinsamen Cuisine-Präferenzen.
+
+## Cosine Similarity
+
+Die Cosine Similarity Funktion kann verwendet werden, um die Ähnlichkeit zwischen Vektoren zu berechnen:
+
+```cypher
+MATCH (p1:Person {name: 'John'})-[likes1:LIKES]->(cuisine)
+MATCH (p2:Person)-[likes2:LIKES]->(cuisine2) WHERE p1 <> p2
+WITH p1, collect(likes1.score) AS p1L, p2, collect(likes2.score) AS p2L
+RETURN p1.name AS from, p2.name AS to,
+       gds.similarity.cosine(p1L, p2L) AS cosine;
+```
+
+Dies berechnet die Cosine Similarity zwischen Johns Cuisine-Bewertungen und denen aller anderen Personen.
+
+## Similarity Graph
+
+Man kann auch einen Similarity Graph erstellen, der Ähnlichkeitsbeziehungen zwischen Knoten darstellt:
+
+```cypher
+CALL gds.graph.project('movies', 
+  ['Movie', 'Genre'],
+  {
+    GENRE: {
+      type: 'IN_GENRE',
+      orientation: 'UNDIRECTED'
+    }
+  }
+)
+
+CALL gds.nodeSimilarity.write('movies', {
+  writeRelationshipType: 'SIMILAR',
+  writeProperty: 'score'
+})
+YIELD nodesCompared, relationshipsWritten
+```
+
+Dies erstellt SIMILAR-Beziehungen zwischen ähnlichen Filmen basierend auf gemeinsamen Genres.
+
+## Clustering mit Similarity
+
+Ähnlichkeitsgraphen können auch für Clustering verwendet werden:
+
+```cypher
+CALL gds.louvain.write('movies', {
+  writeProperty: 'community',
+  relationshipWeightProperty: 'score'
+})
+YIELD communityCount, modularity
+```
+
+Dies wendet den Louvain-Algorithmus auf den Ähnlichkeitsgraphen an, um Cluster ähnlicher Filme zu finden.
+
+Diese Beispiele zeigen, wie man mit GDS Ähnlichkeiten berechnen, Ähnlichkeitsgraphen erstellen und darauf basierend Analysen durchführen kann. Die genaue Implementierung hängt vom spezifischen Anwendungsfall und der Datenstruktur ab.
+
+Citations:
+[1] https://neo4j.com/docs/graph-data-science/current/algorithms/similarity/
+[2] https://stackoverflow.com/questions/72267417/neo4j-similarity-of-single-node-with-entire-graph
+[3] https://medium.com/neo4j/topic-extraction-with-neo4j-graph-data-science-for-better-semantic-search-c5b7f56c7715
+[4] https://data-xtractor.com/blog/graphs/neo4j-graph-algorithms-similarity/
+[7] https://neo4j.com/docs/graph-data-science/current/algorithms/node-similarity/
+[8] https://neo4j.com/docs/graph-data-science/current/algorithms/similarity-functions/

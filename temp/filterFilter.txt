@@ -1,0 +1,102 @@
+Der von Ihnen ausgeführte Cypher-Query-Fehler deutet auf eine Typinkonsistenz hin, bei der Neo4j einen `Integer` anstelle eines erwarteten Typs wie `Map`, `Node`, `Relationship` usw. erhält. Schauen wir uns die Fehlermeldung genauer an:
+
+```
+Type mismatch: expected Map, Node, Relationship, Point, Duration, Date, Time, LocalTime, LocalDateTime or DateTime but was Integer (line 9, column 63 (offset: 317))
+"          AND ALL(filter IN $filterFilters WHERE NOT toString(node2.docId) IN filter)"
+                                                               ^
+```
+
+### **Fehleranalyse**
+
+1. **Problemstelle:**
+   Die Fehlermeldung weist auf die folgende Zeile hin:
+   ```cypher
+   AND ALL(filter IN $filterFilters WHERE NOT toString(node2.docId) IN filter)
+   ```
+   Hier wird erwartet, dass `filter` ein **Collection-Typ** (z.B. Liste) ist, da der `IN`-Operator verwendet wird, um zu überprüfen, ob `node2.docId` in `filter` enthalten ist. Der Fehler besagt jedoch, dass `filter` ein `Integer` ist, was nicht kompatibel ist.
+
+2. **Mögliche Ursache:**
+   - **Struktur von `$filterFilters`:** Es scheint, dass die Variable `$filterFilters` eine Liste von **einzelnen Werten** (z.B. `Integer`) enthält, anstatt eine Liste von **Sammlungen** (z.B. Listen von Strings).
+   - **Verwendung des `ALL`-Filters:** Der `ALL`-Filter erwartet, dass jedes Element (`filter`) in `$filterFilters` eine Sammlung ist, gegen die geprüft werden kann. Wenn `filter` jedoch ein einzelner `Integer` ist, führt dies zu dem genannten Fehler.
+
+### **Lösungsansätze**
+
+1. **Überprüfen Sie die Struktur von `$filterFilters`:**
+   Stellen Sie sicher, dass `$filterFilters` eine Liste von Sammlungen (z.B. Listen von Strings) ist. Beispielsweise sollte es so aussehen:
+   ```json
+   [
+     ["filter1", "filter2"],
+     ["filter3", "filter4"]
+   ]
+   ```
+   Wenn `$filterFilters` hingegen nur eine Liste von Strings oder eine Liste von Integers ist, müssen Sie den Query entsprechend anpassen.
+
+2. **Anpassen des Cypher-Queries basierend auf der Struktur von `$filterFilters`:**
+
+   - **Fall 1: `$filterFilters` ist eine Liste von Strings**
+     Wenn `$filterFilters` eine einfache Liste von Strings ist, die Sie ausschließen möchten, können Sie den `ALL`-Filter entfernen und direkt überprüfen, ob `node2.docId` **nicht** in der Liste enthalten ist:
+     ```cypher
+     AND NOT toString(node2.docId) IN $filterFilters
+     ```
+     **Angepasster Query-Auszug:**
+     ```cypher
+     WHERE $namespace IN labels(gds.util.asNode(node2))
+       AND NOT toString(node2.docId) IN $filterFilters
+       AND similarity >= $similarityThreshold
+     ```
+
+   - **Fall 2: `$filterFilters` ist eine Liste von Listen**
+     Wenn `$filterFilters` tatsächlich eine Liste von Listen ist und Sie sicherstellen möchten, dass `node2.docId` in **keiner** der inneren Listen enthalten ist, können Sie den `ALL`-Filter verwenden, jedoch muss jede `filter`-Liste eine Sammlung sein:
+     ```cypher
+     AND ALL(filter IN $filterFilters WHERE NOT toString(node2.docId) IN filter)
+     ```
+     **Stellen Sie sicher**, dass `$filterFilters` korrekt als Liste von Listen übergeben wird.
+
+   - **Fall 3: `$filterFilters` ist eine Liste von Integers oder anderen Typen**
+     Wenn `$filterFilters` tatsächlich eine Liste von Integers sein sollte, die mit `docId` verglichen werden, müssen Sie entweder:
+     - Den Typ von `docId` ändern (z.B. zu Integer), falls dies sinnvoll ist.
+     - Oder die Logik des Filters überdenken, um kompatible Typen zu verwenden.
+
+3. **Beispiel für Anpassung des Parameters:**
+
+   Angenommen, Sie möchten `filterFilters` als eine Liste von Strings übergeben, dann sollte die Parameterübergabe im Code (z.B. JavaScript) wie folgt aussehen:
+   ```javascript
+   const params = {
+     namespace: 'IhrNamespace',
+     filterFilters: ['filter1', 'filter2', 'filter3'], // Liste von Strings
+     topN: neo4j.int(topN * 3),
+     queryVector: queryVector, // Ihre Vektor-Daten
+     similarityThreshold: similarityThreshold
+   };
+   ```
+   Und der angepasste Cypher-Query-Teil:
+   ```cypher
+   AND NOT toString(node2.docId) IN $filterFilters
+   ```
+
+4. **Debugging-Schritte:**
+
+   Um den genauen Inhalt und Typ von `$filterFilters` zu überprüfen, können Sie eine einfache Abfrage ausführen:
+   ```cypher
+   RETURN $filterFilters AS filterFilters, 
+          [filter IN $filterFilters | apoc.meta.type(filter)] AS filterTypes
+   ```
+   Dies gibt Ihnen eine Übersicht über die enthaltenen Werte und deren Typen.
+
+5. **Alternative Überprüfung ohne `ALL`:**
+
+   Falls die Verwendung von `ALL` nicht zwingend erforderlich ist, können Sie alternative Logik verwenden, um `docId`-Werte auszuschließen. Zum Beispiel:
+   ```cypher
+   WHERE $namespace IN labels(gds.util.asNode(node2))
+     AND NOT ANY(filter IN $filterFilters WHERE toString(node2.docId) = filter)
+     AND similarity >= $similarityThreshold
+   ```
+   Dies überprüft, ob `node2.docId` in keiner der Filterbedingungen enthalten ist.
+
+### **Zusammenfassung**
+
+Der Fehler entsteht, weil die Variable `filter` innerhalb des `ALL`-Filters einen `Integer` anstelle einer erwarteten Sammlung erhält. Um dies zu beheben:
+
+1. **Überprüfen Sie die Struktur von `$filterFilters`** und stellen Sie sicher, dass sie den Erwartungen des Queries entspricht (z.B. Liste von Listen oder Liste von Strings).
+2. **Passen Sie den Cypher-Query an** basierend auf der tatsächlichen Struktur von `$filterFilters`.
+3. **Nutzen Sie Debugging-Schritte**, um den Inhalt und die Typen der übergebenen Parameter zu validieren.
